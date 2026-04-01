@@ -1,0 +1,12 @@
+mne
+numpy
+pandas
+scipy
+matplotlib
+seaborn
+tensorflow
+scikit-learn
+shap
+optuna
+pyswarms
+mne
