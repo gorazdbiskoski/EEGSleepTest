@@ -4,6 +4,9 @@ import time
 import numpy as np
 import pandas as pd
 import pyswarms as ps
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 from model.data_loader import load_data
 from model.model_builder import evaluate_model
@@ -17,13 +20,35 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 results_log = []
 
+VIZ_DIR = os.path.join(os.path.dirname(__file__), 'viz')
+os.makedirs(VIZ_DIR, exist_ok=True)
+
+fig_conv, ax_conv = plt.subplots(figsize=(8, 4))
+ax_conv.set_title('PSO – Convergence')
+ax_conv.set_xlabel('Iteration')
+ax_conv.set_ylabel('Best val_loss')
+conv_x, conv_y = [], []
+(conv_line,) = ax_conv.plot([], [], marker='o', color='darkorange')
+_pso_iter = [0]   # mutable counter accessible inside objective
+
+
+def _update_convergence(iteration, best_loss):
+    conv_x.append(iteration)
+    conv_y.append(best_loss)
+    conv_line.set_data(conv_x, conv_y)
+    ax_conv.relim()
+    ax_conv.autoscale_view()
+    fig_conv.tight_layout()
+    fig_conv.savefig(os.path.join(VIZ_DIR, 'pso_convergence.png'), dpi=100)
+
 
 def objective_function(particles):
     global results_log
     scores = []
 
     for p in particles:
-        params = [int(p[0]), int(p[1]), int(p[2]), float(p[3]), float(p[4]), int(p[5])]
+        params = [int(p[0]), int(p[1]), int(p[2]),
+                  float(p[3]), float(p[4]), int(p[5])]
         loss = evaluate_model(params, X_train, X_test, y_train, y_test)
 
         results_log.append({
@@ -38,6 +63,11 @@ def objective_function(particles):
         })
 
         scores.append(loss)
+
+    best_this_iter = min(scores)
+    current_best = min(conv_y + [best_this_iter])
+    _pso_iter[0] += 1
+    _update_convergence(_pso_iter[0], current_best)
 
     return np.array(scores)
 
@@ -59,7 +89,6 @@ def append_best_to_summary(best_pos, best_cost, elapsed):
     results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
     os.makedirs(results_dir, exist_ok=True)
     summary_path = os.path.join(results_dir, 'best_results.csv')
-
     row = pd.DataFrame([{
         "filters":        int(best_pos[0]),
         "kernel_size":    int(best_pos[1]),
@@ -71,7 +100,6 @@ def append_best_to_summary(best_pos, best_cost, elapsed):
         "method":         "PSO",
         "execution_time": round(elapsed, 4),
     }])
-
     write_header = not os.path.exists(summary_path)
     row.to_csv(summary_path, mode='a', header=write_header, index=False)
 
@@ -89,3 +117,6 @@ if __name__ == "__main__":
     df.to_csv(os.path.join(results_dir, 'pso_results.csv'), index=False)
 
     append_best_to_summary(best_pos, best_cost, elapsed)
+
+    plt.close('all')
+    print(f"Visualisations saved to {VIZ_DIR}")

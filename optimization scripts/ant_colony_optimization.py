@@ -3,6 +3,9 @@ import time
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 from model.data_loader import load_data
@@ -36,30 +39,64 @@ EVAPORATION_RATE = 0.3
 ALPHA = 1.0
 Q = 1.0
 
+# ── visualisation setup ────────────────────────────────────────────────────────
+VIZ_DIR = os.path.join(os.path.dirname(__file__), 'viz')
+os.makedirs(VIZ_DIR, exist_ok=True)
+
+fig_conv, ax_conv = plt.subplots(figsize=(8, 4))
+ax_conv.set_title('ACO – Convergence')
+ax_conv.set_xlabel('Iteration')
+ax_conv.set_ylabel('Best val_loss')
+conv_x, conv_y = [], []
+(conv_line,) = ax_conv.plot([], [], marker='o', color='royalblue')
+
+param_names = list(PARAM_SPACE.keys())
+fig_heat, ax_heat = plt.subplots(figsize=(10, 4))
+
+
+def _update_convergence(iteration, best_loss):
+    conv_x.append(iteration)
+    conv_y.append(best_loss)
+    conv_line.set_data(conv_x, conv_y)
+    ax_conv.relim()
+    ax_conv.autoscale_view()
+    fig_conv.savefig(os.path.join(VIZ_DIR, 'aco_convergence.png'), dpi=100)
+
+
+def _update_pheromone_heatmap(iteration):
+    max_len = max(len(PARAM_SPACE[p]) for p in param_names)
+    matrix = np.full((len(param_names), max_len), np.nan)
+    for i, p in enumerate(param_names):
+        vals = pheromones[p]
+        matrix[i, :len(vals)] = vals / vals.sum()   # normalise to [0,1]
+
+    ax_heat.cla()
+    im = ax_heat.imshow(matrix, aspect='auto', cmap='YlOrRd',
+                        vmin=0, interpolation='nearest')
+    ax_heat.set_yticks(range(len(param_names)))
+    ax_heat.set_yticklabels(param_names)
+    ax_heat.set_xlabel('Parameter value index')
+    ax_heat.set_title(f'ACO – Pheromone heatmap (iter {iteration})')
+    fig_heat.colorbar(im, ax=ax_heat, label='Normalised pheromone')
+    fig_heat.tight_layout()
+    fig_heat.savefig(os.path.join(VIZ_DIR, 'aco_pheromone_heatmap.png'), dpi=100)
+# ──────────────────────────────────────────────────────────────────────────────
+
 
 def choose_parameter(param_name):
     pheromone = pheromones[param_name]
-
     probabilities = pheromone ** ALPHA
     probabilities = probabilities / probabilities.sum()
-
-    index = np.random.choice(
-        range(len(PARAM_SPACE[param_name])),
-        p=probabilities
-    )
-
+    index = np.random.choice(range(len(PARAM_SPACE[param_name])), p=probabilities)
     return PARAM_SPACE[param_name][index], index
 
 
 def construct_solution():
-    solution = {}
-    indices = {}
-
+    solution, indices = {}, {}
     for param in PARAM_SPACE:
         value, idx = choose_parameter(param)
         solution[param] = value
         indices[param] = idx
-
     return solution, indices
 
 
@@ -72,23 +109,13 @@ def evaluate_solution(solution):
         float(solution["learning_rate"]),
         int(solution["batch_size"])
     ]
-
-    loss = evaluate_model(
-        params,
-        X_train,
-        X_test,
-        y_train,
-        y_test
-    )
-
-    return loss
+    return evaluate_model(params, X_train, X_test, y_train, y_test)
 
 
 def append_best_to_summary(best_solution, best_loss, elapsed):
     results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
     os.makedirs(results_dir, exist_ok=True)
     summary_path = os.path.join(results_dir, 'best_results.csv')
-
     row = pd.DataFrame([{
         "filters":        best_solution["filters"],
         "kernel_size":    best_solution["kernel_size"],
@@ -100,7 +127,6 @@ def append_best_to_summary(best_solution, best_loss, elapsed):
         "method":         "ACO",
         "execution_time": round(elapsed, 4),
     }])
-
     write_header = not os.path.exists(summary_path)
     row.to_csv(summary_path, mode='a', header=write_header, index=False)
 
@@ -116,7 +142,6 @@ if __name__ == "__main__":
 
         for ant in range(NUM_ANTS):
             solution, indices = construct_solution()
-
             loss = evaluate_solution(solution)
 
             results_log.append({
@@ -144,21 +169,17 @@ if __name__ == "__main__":
                 idx = indices[param]
                 pheromones[param][idx] += Q / (loss + 1e-8)
 
+        _update_convergence(iteration + 1, best_loss)
+        _update_pheromone_heatmap(iteration + 1)
+
     elapsed = time.perf_counter() - start_time
 
     df = pd.DataFrame(results_log)
-
-    results_dir = os.path.join(
-        os.path.dirname(__file__),
-        '..',
-        'results'
-    )
-
+    results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
     os.makedirs(results_dir, exist_ok=True)
-
-    df.to_csv(
-        os.path.join(results_dir, 'aco_results.csv'),
-        index=False
-    )
+    df.to_csv(os.path.join(results_dir, 'aco_results.csv'), index=False)
 
     append_best_to_summary(best_solution, best_loss, elapsed)
+
+    plt.close('all')
+    print(f"Visualisations saved to {VIZ_DIR}")
