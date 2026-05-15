@@ -35,13 +35,11 @@ def plot_hpo_dashboard(all_results):
     sns.set_theme(style="whitegrid")
     fig, axes = plt.subplots(1, 3, figsize=(22, 7))
 
-    # This shows the probability of finding a specific loss level
     sns.ecdfplot(data=clean_results, x='val_loss', hue='method', ax=axes[0], linewidth=3)
     axes[0].set_title('Search Reliability (ECDF)', fontsize=15, fontweight='bold')
     axes[0].set_xlabel('Validation MSE (Lower is Better)')
     axes[0].set_ylabel('Proportion of Trials')
 
-    # We use a Random Forest to see which setting "moves the needle" the most
     X = all_results[features]
     y = all_results['val_loss']
 
@@ -57,7 +55,6 @@ def plot_hpo_dashboard(all_results):
     axes[1].set_title('Which Setting Matters Most?', fontsize=15, fontweight='bold')
     axes[1].set_xlabel('Relative Importance (%)')
 
-    # Shows if a parameter has a linear relationship with success
     corr = clean_results[features + ['val_loss']].corr()[['val_loss']].drop('val_loss')
     sns.heatmap(corr, annot=True, cmap='coolwarm', center=0, ax=axes[2], fmt=".2f")
     axes[2].set_title('Parameter Correlation with Loss', fontsize=15, fontweight='bold')

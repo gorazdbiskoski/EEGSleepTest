@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 import os
 
-# ── Sleep stage label mapping ──────────────────────────────────────────────────
 STAGE_MAPPING = {
     "Sleep stage W":  "W",
     "Sleep stage 1":  "N1",
@@ -70,20 +69,20 @@ def compute_features(hypnogram_df):
     Compute 6 sleep-quality features from a single night's hypnogram.
     Returns a dict (one row of features + the real target).
     """
-    TST = hypnogram_df[hypnogram_df["Stage"] != "W"]["Duration"].sum() / 60  # minutes
+    TST = hypnogram_df[hypnogram_df["Stage"] != "W"]["Duration"].sum() / 60
 
-    N3_total      = hypnogram_df[hypnogram_df["Stage"] == "N3"]["Duration"].sum()
+    N3_total = hypnogram_df[hypnogram_df["Stage"] == "N3"]["Duration"].sum()
     N3_percentage = (N3_total / (TST * 60)) * 100 if TST > 0 else 0.0
 
-    REM_total      = hypnogram_df[hypnogram_df["Stage"] == "REM"]["Duration"].sum()
+    REM_total  = hypnogram_df[hypnogram_df["Stage"] == "REM"]["Duration"].sum()
     REM_percentage = (REM_total / (TST * 60)) * 100 if TST > 0 else 0.0
 
     awakenings = len(hypnogram_df[hypnogram_df["Stage"] == "W"])
 
     non_wake = hypnogram_df[hypnogram_df["Stage"] != "W"]
-    SOL = non_wake["Onset"].min() / 60 if not non_wake.empty else 0.0  # minutes
+    SOL = non_wake["Onset"].min() / 60 if not non_wake.empty else 0.0
 
-    time_in_bed      = hypnogram_df["Duration"].sum() / 60  # minutes
+    time_in_bed  = hypnogram_df["Duration"].sum() / 60
     sleep_efficiency = (TST / time_in_bed) * 100 if time_in_bed > 0 else 0.0
 
     return {
@@ -108,7 +107,7 @@ def load_data():
     y : np.ndarray, shape (n_subjects,)
         Sleep efficiency score (real target, NOT random noise).
     """
-    data_dir = r"C:\sleep-edfx\sleep-cassette"   # ← adjust if needed
+    data_dir = r"C:\sleep-edfx\sleep-cassette"
 
     pairs = get_matched_pairs(data_dir)
     if not pairs:
@@ -121,20 +120,20 @@ def load_data():
 
     for psg_path, hyp_path in pairs:
         subject = os.path.basename(psg_path)
-        print(f"  Processing {subject} …")
+        print(f"Processing {subject} …")
 
         try:
             hypnogram_df = load_hypnogram(hyp_path)
 
             if hypnogram_df.empty:
-                print(f"    [warn] Empty hypnogram for {subject}, skipping.")
+                print(f"[warn] Empty hypnogram for {subject}, skipping.")
                 continue
 
             row = compute_features(hypnogram_df)
             features_list.append(row)
 
         except Exception as e:
-            print(f"    [error] Failed to process {subject}: {e}")
+            print(f"[error] Failed to process {subject}: {e}")
             continue
 
     if not features_list:
@@ -145,8 +144,8 @@ def load_data():
     feature_cols = ["TST", "N3_percentage", "REM_percentage",
                     "Awakenings", "SOL", "Sleep_Efficiency"]
 
-    X = np.expand_dims(df[feature_cols].values, axis=-1)   # (n_subjects, 6, 1)
-    y = df["_target"].values                               # (n_subjects,)
+    X = np.expand_dims(df[feature_cols].values, axis=-1)
+    y = df["_target"].values
 
     print(f"\nLoaded {len(y)} subjects.")
     print(f"X shape: {X.shape}  |  y shape: {y.shape}")

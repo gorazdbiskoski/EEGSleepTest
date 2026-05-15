@@ -1,0 +1,164 @@
+import os
+import time
+
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+from model.data_loader import load_data
+from model.model_builder import evaluate_model
+
+X, y = load_data()
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+results_log = []
+
+PARAM_SPACE = {
+    "filters": [16, 32, 64, 96, 128],
+    "kernel_size": [2, 3, 4, 5],
+    "lstm_units": [32, 64, 96, 128],
+    "dropout": [0.1, 0.2, 0.3, 0.4, 0.5],
+    "learning_rate": [1e-4, 5e-4, 1e-3, 5e-3, 1e-2],
+    "batch_size": [16, 32, 48, 64]
+}
+
+pheromones = {
+    key: np.ones(len(values))
+    for key, values in PARAM_SPACE.items()
+}
+
+NUM_ANTS = 10
+NUM_ITERATIONS = 10
+EVAPORATION_RATE = 0.3
+ALPHA = 1.0
+Q = 1.0
+
+
+def choose_parameter(param_name):
+    pheromone = pheromones[param_name]
+
+    probabilities = pheromone ** ALPHA
+    probabilities = probabilities / probabilities.sum()
+
+    index = np.random.choice(
+        range(len(PARAM_SPACE[param_name])),
+        p=probabilities
+    )
+
+    return PARAM_SPACE[param_name][index], index
+
+
+def construct_solution():
+    solution = {}
+    indices = {}
+
+    for param in PARAM_SPACE:
+        value, idx = choose_parameter(param)
+        solution[param] = value
+        indices[param] = idx
+
+    return solution, indices
+
+
+def evaluate_solution(solution):
+    params = [
+        int(solution["filters"]),
+        int(solution["kernel_size"]),
+        int(solution["lstm_units"]),
+        float(solution["dropout"]),
+        float(solution["learning_rate"]),
+        int(solution["batch_size"])
+    ]
+
+    loss = evaluate_model(
+        params,
+        X_train,
+        X_test,
+        y_train,
+        y_test
+    )
+
+    return loss
+
+
+def append_best_to_summary(best_solution, best_loss, elapsed):
+    results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
+    os.makedirs(results_dir, exist_ok=True)
+    summary_path = os.path.join(results_dir, 'best_results.csv')
+
+    row = pd.DataFrame([{
+        "filters":        best_solution["filters"],
+        "kernel_size":    best_solution["kernel_size"],
+        "lstm_units":     best_solution["lstm_units"],
+        "dropout":        best_solution["dropout"],
+        "learning_rate":  best_solution["learning_rate"],
+        "batch_size":     best_solution["batch_size"],
+        "val_loss":       best_loss,
+        "method":         "ACO",
+        "execution_time": round(elapsed, 4),
+    }])
+
+    write_header = not os.path.exists(summary_path)
+    row.to_csv(summary_path, mode='a', header=write_header, index=False)
+
+
+if __name__ == "__main__":
+    best_loss = float("inf")
+    best_solution = None
+
+    start_time = time.perf_counter()
+
+    for iteration in range(NUM_ITERATIONS):
+        all_solutions = []
+
+        for ant in range(NUM_ANTS):
+            solution, indices = construct_solution()
+
+            loss = evaluate_solution(solution)
+
+            results_log.append({
+                "filters": solution["filters"],
+                "kernel_size": solution["kernel_size"],
+                "lstm_units": solution["lstm_units"],
+                "dropout": solution["dropout"],
+                "learning_rate": solution["learning_rate"],
+                "batch_size": solution["batch_size"],
+                "val_loss": loss,
+                "method": "ACO"
+            })
+
+            all_solutions.append((solution, indices, loss))
+
+            if loss < best_loss:
+                best_loss = loss
+                best_solution = solution
+
+        for param in pheromones:
+            pheromones[param] *= (1 - EVAPORATION_RATE)
+
+        for solution, indices, loss in all_solutions:
+            for param in PARAM_SPACE:
+                idx = indices[param]
+                pheromones[param][idx] += Q / (loss + 1e-8)
+
+    elapsed = time.perf_counter() - start_time
+
+    df = pd.DataFrame(results_log)
+
+    results_dir = os.path.join(
+        os.path.dirname(__file__),
+        '..',
+        'results'
+    )
+
+    os.makedirs(results_dir, exist_ok=True)
+
+    df.to_csv(
+        os.path.join(results_dir, 'aco_results.csv'),
+        index=False
+    )
+
+    append_best_to_summary(best_solution, best_loss, elapsed)

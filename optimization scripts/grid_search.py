@@ -1,4 +1,5 @@
 import os
+import time
 import itertools
 import pandas as pd
 
@@ -20,6 +21,7 @@ space_lstm = [32, 64]
 space_dropout = [0.1, 0.3, 0.5]
 space_lr = [0.01, 0.001, 0.0001]
 space_batch = [16, 32, 64]
+
 
 def run_grid_search():
     best_loss = float('inf')
@@ -62,16 +64,39 @@ def run_grid_search():
 
     return best_loss, best_params
 
+
+def append_best_to_summary(best_params, best_loss, elapsed):
+    results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
+    os.makedirs(results_dir, exist_ok=True)
+    summary_path = os.path.join(results_dir, 'best_results.csv')
+
+    f, k, u, d, lr, b = best_params
+    row = pd.DataFrame([{
+        "filters":        f,
+        "kernel_size":    k,
+        "lstm_units":     u,
+        "dropout":        d,
+        "learning_rate":  lr,
+        "batch_size":     b,
+        "val_loss":       best_loss,
+        "method":         "Grid Search",
+        "execution_time": round(elapsed, 4),
+    }])
+
+    write_header = not os.path.exists(summary_path)
+    row.to_csv(summary_path, mode='a', header=write_header, index=False)
+
+
 if __name__ == "__main__":
+    start_time = time.perf_counter()
+
     best_cost, best_pos = run_grid_search()
+
+    elapsed = time.perf_counter() - start_time
 
     df = pd.DataFrame(results_log)
     results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
     os.makedirs(results_dir, exist_ok=True)
     df.to_csv(os.path.join(results_dir, 'grid_search_results.csv'), index=False)
 
-    print("\n" + "="*40)
-    print("Grid Search Optimization Complete!")
-    print(f"Best Validation Loss: {best_cost:.4f}")
-    print(f"Best Parameters: {best_pos}")
-    print("="*40)
+    append_best_to_summary(best_pos, best_cost, elapsed)

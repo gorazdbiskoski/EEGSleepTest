@@ -1,4 +1,5 @@
 import os
+import time
 
 import numpy as np
 import pandas as pd
@@ -15,6 +16,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 results_log = []
+
 
 def objective_function(particles):
     global results_log
@@ -39,6 +41,7 @@ def objective_function(particles):
 
     return np.array(scores)
 
+
 bounds = (
     np.array([16, 2, 32, 0.1, 1e-4, 16]),
     np.array([128, 5, 128, 0.5, 1e-2, 64])
@@ -51,12 +54,38 @@ optimizer = ps.single.GlobalBestPSO(
     bounds=bounds
 )
 
+
+def append_best_to_summary(best_pos, best_cost, elapsed):
+    results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
+    os.makedirs(results_dir, exist_ok=True)
+    summary_path = os.path.join(results_dir, 'best_results.csv')
+
+    row = pd.DataFrame([{
+        "filters":        int(best_pos[0]),
+        "kernel_size":    int(best_pos[1]),
+        "lstm_units":     int(best_pos[2]),
+        "dropout":        float(best_pos[3]),
+        "learning_rate":  float(best_pos[4]),
+        "batch_size":     int(best_pos[5]),
+        "val_loss":       best_cost,
+        "method":         "PSO",
+        "execution_time": round(elapsed, 4),
+    }])
+
+    write_header = not os.path.exists(summary_path)
+    row.to_csv(summary_path, mode='a', header=write_header, index=False)
+
+
 if __name__ == "__main__":
+    start_time = time.perf_counter()
+
     best_cost, best_pos = optimizer.optimize(objective_function, iters=10)
+
+    elapsed = time.perf_counter() - start_time
 
     df = pd.DataFrame(results_log)
     results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
     os.makedirs(results_dir, exist_ok=True)
     df.to_csv(os.path.join(results_dir, 'pso_results.csv'), index=False)
 
-    print("Best:", best_cost, best_pos)
+    append_best_to_summary(best_pos, best_cost, elapsed)
