@@ -40,7 +40,7 @@ ALPHA = 1.0
 Q = 1.0
 
 # ── visualisation setup ────────────────────────────────────────────────────────
-VIZ_DIR = os.path.join(os.path.dirname(__file__), 'viz')
+VIZ_DIR = os.path.join(os.path.dirname(__file__), 'convergence plots')
 os.makedirs(VIZ_DIR, exist_ok=True)
 
 fig_conv, ax_conv = plt.subplots(figsize=(8, 4))
@@ -51,7 +51,16 @@ conv_x, conv_y = [], []
 (conv_line,) = ax_conv.plot([], [], marker='o', color='royalblue')
 
 param_names = list(PARAM_SPACE.keys())
-fig_heat, ax_heat = plt.subplots(figsize=(10, 4))
+_max_len = max(len(PARAM_SPACE[p]) for p in param_names)
+_heat_matrix = np.full((len(param_names), _max_len), np.nan)
+fig_heat, ax_heat = plt.subplots(figsize=(7, 4))
+_im = ax_heat.imshow(_heat_matrix, aspect='auto', cmap='YlOrRd',
+                     vmin=0, vmax=1, interpolation='nearest')
+ax_heat.set_yticks(range(len(param_names)))
+ax_heat.set_yticklabels(param_names)
+ax_heat.set_xlabel('Parameter value index')
+fig_heat.colorbar(_im, ax=ax_heat, label='Normalised pheromone')
+fig_heat.tight_layout()
 
 
 def _update_convergence(iteration, best_loss):
@@ -64,21 +73,12 @@ def _update_convergence(iteration, best_loss):
 
 
 def _update_pheromone_heatmap(iteration):
-    max_len = max(len(PARAM_SPACE[p]) for p in param_names)
-    matrix = np.full((len(param_names), max_len), np.nan)
     for i, p in enumerate(param_names):
         vals = pheromones[p]
-        matrix[i, :len(vals)] = vals / vals.sum()   # normalise to [0,1]
-
-    ax_heat.cla()
-    im = ax_heat.imshow(matrix, aspect='auto', cmap='YlOrRd',
-                        vmin=0, interpolation='nearest')
-    ax_heat.set_yticks(range(len(param_names)))
-    ax_heat.set_yticklabels(param_names)
-    ax_heat.set_xlabel('Parameter value index')
+        _heat_matrix[i, :] = np.nan
+        _heat_matrix[i, :len(vals)] = vals / vals.sum()
+    _im.set_data(_heat_matrix)
     ax_heat.set_title(f'ACO – Pheromone heatmap (iter {iteration})')
-    fig_heat.colorbar(im, ax=ax_heat, label='Normalised pheromone')
-    fig_heat.tight_layout()
     fig_heat.savefig(os.path.join(VIZ_DIR, 'aco_pheromone_heatmap.png'), dpi=100)
 # ──────────────────────────────────────────────────────────────────────────────
 

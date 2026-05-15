@@ -25,7 +25,7 @@ space_dropout = [0.1, 0.3, 0.5]
 space_lr      = [0.01, 0.001, 0.0001]
 space_batch   = [16, 32, 64]
 
-VIZ_DIR = os.path.join(os.path.dirname(__file__), 'viz')
+VIZ_DIR = os.path.join(os.path.dirname(__file__), 'convergence plots')
 os.makedirs(VIZ_DIR, exist_ok=True)
 
 fig_conv, ax_conv = plt.subplots(figsize=(8, 4))

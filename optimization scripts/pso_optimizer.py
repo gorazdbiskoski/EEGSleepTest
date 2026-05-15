@@ -20,7 +20,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 results_log = []
 
-VIZ_DIR = os.path.join(os.path.dirname(__file__), 'viz')
+VIZ_DIR = os.path.join(os.path.dirname(__file__), 'convergence plots')
 os.makedirs(VIZ_DIR, exist_ok=True)
 
 fig_conv, ax_conv = plt.subplots(figsize=(8, 4))
