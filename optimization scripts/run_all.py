@@ -2,7 +2,7 @@ import subprocess
 import sys
 
 OPTIMIZERS = [
-    "ant_colony_optimization.py"
+    "ant_colony_optimization.py",
     "bayesian_optimization_algorithm.py",
     "grid_search.py",
     "pso_optimizer.py",
