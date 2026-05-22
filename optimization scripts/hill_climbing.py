@@ -1,6 +1,5 @@
 import os
 import time
-import math
 import random
 
 import numpy as np
@@ -31,9 +30,6 @@ PARAM_SPACE = {
 }
 
 MAX_EVALS = 100
-T_START = 1.0
-COOLING_RATE = 0.95
-T_MIN = 1e-3
 RANDOM_SEED = 42
 
 random.seed(RANDOM_SEED)
@@ -43,11 +39,11 @@ VIZ_DIR = os.path.join(os.path.dirname(__file__), 'convergence plots')
 os.makedirs(VIZ_DIR, exist_ok=True)
 
 fig_conv, ax_conv = plt.subplots(figsize=(8, 4))
-ax_conv.set_title('Simulated Annealing - Convergence')
+ax_conv.set_title('Hill Climbing (Random Restart) - Convergence')
 ax_conv.set_xlabel('Evaluation #')
 ax_conv.set_ylabel('Best val_loss')
 conv_x, conv_y = [], []
-(conv_line,) = ax_conv.plot([], [], marker='o', color='teal')
+(conv_line,) = ax_conv.plot([], [], marker='o', color='indigo')
 
 
 def _update_convergence(eval_num, best_loss):
@@ -58,7 +54,7 @@ def _update_convergence(eval_num, best_loss):
     ax_conv.autoscale_view()
     fig_conv.tight_layout()
     fig_conv.savefig(
-        os.path.join(VIZ_DIR, 'simulated_annealing_convergence.png'),
+        os.path.join(VIZ_DIR, 'hill_climbing_convergence.png'),
         dpi=100
     )
 
@@ -70,22 +66,17 @@ def random_individual():
     }
 
 
-def random_neighbor(individual):
-    neighbor = individual.copy()
-    param = random.choice(list(PARAM_SPACE.keys()))
-    values = PARAM_SPACE[param]
-
-    current_idx = values.index(individual[param])
-    step = random.choice([-1, 1])
-    new_idx = current_idx + step
-
-    if new_idx < 0:
-        new_idx = 1
-    elif new_idx >= len(values):
-        new_idx = len(values) - 2
-
-    neighbor[param] = values[new_idx]
-    return neighbor
+def get_neighbors(individual):
+    neighbors = []
+    for param, values in PARAM_SPACE.items():
+        current_idx = values.index(individual[param])
+        for step in (-1, 1):
+            new_idx = current_idx + step
+            if 0 <= new_idx < len(values):
+                neighbor = individual.copy()
+                neighbor[param] = values[new_idx]
+                neighbors.append(neighbor)
+    return neighbors
 
 
 def evaluate_individual(individual):
@@ -100,7 +91,7 @@ def evaluate_individual(individual):
     return evaluate_model(params, X_train, X_test, y_train, y_test)
 
 
-def log_trial(individual, loss):
+def log_trial(individual, loss, restart_id):
     results_log.append({
         "filters": individual["filters"],
         "kernel_size": individual["kernel_size"],
@@ -109,7 +100,8 @@ def log_trial(individual, loss):
         "learning_rate": individual["learning_rate"],
         "batch_size": individual["batch_size"],
         "val_loss": loss,
-        "method": "Simulated Annealing"
+        "restart_id": restart_id,
+        "method": "Hill Climbing"
     })
 
 
@@ -125,7 +117,7 @@ def append_best_to_summary(best_solution, best_loss, elapsed):
         "learning_rate":  best_solution["learning_rate"],
         "batch_size":     best_solution["batch_size"],
         "val_loss":       best_loss,
-        "method":         "Simulated Annealing",
+        "method":         "Hill Climbing",
         "execution_time": round(elapsed, 4),
     }])
     write_header = not os.path.exists(summary_path)
@@ -135,45 +127,63 @@ def append_best_to_summary(best_solution, best_loss, elapsed):
 if __name__ == "__main__":
     start_time = time.perf_counter()
 
-    current = random_individual()
-    current_loss = evaluate_individual(current)
-    log_trial(current, current_loss)
+    evals_used = 0
+    best_loss = float("inf")
+    best_solution = None
+    restart_id = 0
 
-    best_solution = current.copy()
-    best_loss = current_loss
+    while evals_used < MAX_EVALS:
+        restart_id += 1
 
-    _update_convergence(1, best_loss)
-    print(f"Eval 1/{MAX_EVALS} | T={T_START:.4f} | Best Loss: {best_loss:.6f}")
+        current = random_individual()
+        current_loss = evaluate_individual(current)
+        evals_used += 1
+        log_trial(current, current_loss, restart_id)
 
-    T = T_START
+        if current_loss < best_loss:
+            best_loss = current_loss
+            best_solution = current.copy()
 
-    for step in range(2, MAX_EVALS + 1):
-        if T < T_MIN:
-            print(f"Temperature below T_MIN ({T_MIN}), stopping early at eval {step - 1}.")
-            break
-
-        candidate = random_neighbor(current)
-        candidate_loss = evaluate_individual(candidate)
-        log_trial(candidate, candidate_loss)
-
-        delta = candidate_loss - current_loss
-
-        if delta < 0 or random.random() < math.exp(-delta / T):
-            current = candidate
-            current_loss = candidate_loss
-
-            if current_loss < best_loss:
-                best_loss = current_loss
-                best_solution = current.copy()
-
-        T *= COOLING_RATE
-
-        _update_convergence(step, best_loss)
+        _update_convergence(evals_used, best_loss)
 
         print(
-            f"Eval {step}/{MAX_EVALS} | T={T:.4f} | "
-            f"Candidate Loss: {candidate_loss:.6f} | Best Loss: {best_loss:.6f}"
+            f"Restart {restart_id} (eval {evals_used}/{MAX_EVALS}) | "
+            f"Start loss: {current_loss:.6f} | Best: {best_loss:.6f}"
         )
+
+        # Inner first-improvement HC loop
+        while evals_used < MAX_EVALS:
+            neighbors = get_neighbors(current)
+            random.shuffle(neighbors)
+
+            improved = False
+            for neighbor in neighbors:
+                if evals_used >= MAX_EVALS:
+                    break
+
+                n_loss = evaluate_individual(neighbor)
+                evals_used += 1
+                log_trial(neighbor, n_loss, restart_id)
+
+                if n_loss < best_loss:
+                    best_loss = n_loss
+                    best_solution = neighbor.copy()
+
+                _update_convergence(evals_used, best_loss)
+
+                if n_loss < current_loss:
+                    current = neighbor
+                    current_loss = n_loss
+                    improved = True
+                    print(
+                        f"  HC step (eval {evals_used}/{MAX_EVALS}) | "
+                        f"Loss: {current_loss:.6f} | Best: {best_loss:.6f}"
+                    )
+                    break
+
+            if not improved:
+                print(f"  Local min reached at loss {current_loss:.6f}")
+                break
 
     elapsed = time.perf_counter() - start_time
 
@@ -181,7 +191,7 @@ if __name__ == "__main__":
     results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
     os.makedirs(results_dir, exist_ok=True)
     df.to_csv(
-        os.path.join(results_dir, 'simulated_annealing_results.csv'),
+        os.path.join(results_dir, 'hill_climbing_results.csv'),
         index=False
     )
 
@@ -191,6 +201,6 @@ if __name__ == "__main__":
 
     print(f"\nBest Solution: {best_solution}")
     print(f"Best Validation Loss: {best_loss:.6f}")
-    print(f"Final Temperature: {T:.6f}")
+    print(f"Total Restarts: {restart_id}")
     print(f"Execution Time: {elapsed:.2f} seconds")
     print(f"Visualisations saved to {VIZ_DIR}")
