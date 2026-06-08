@@ -3,4 +3,6 @@
 .idea
 
 sleep-edfx/
-results/
+
+optimization scripts/report.log
+report.log
