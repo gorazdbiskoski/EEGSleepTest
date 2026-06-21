@@ -95,18 +95,7 @@ def compute_features(hypnogram_df):
         "_target":          sleep_efficiency,
     }
 
-
 def load_data():
-    """
-    Main entry point.
-
-    Returns
-    -------
-    X : np.ndarray, shape (n_subjects, 6, 1)
-        Six hypnogram-derived features per night, reshaped for Conv1D input.
-    y : np.ndarray, shape (n_subjects,)
-        Sleep efficiency score (real target, NOT random noise).
-    """
     data_dir = r"C:\sleep-edfx\sleep-cassette"
 
     pairs = get_matched_pairs(data_dir)
@@ -142,7 +131,7 @@ def load_data():
     df = pd.DataFrame(features_list)
 
     feature_cols = ["TST", "N3_percentage", "REM_percentage",
-                    "Awakenings", "SOL", "Sleep_Efficiency"]
+                    "Awakenings", "SOL"]
 
     X = np.expand_dims(df[feature_cols].values, axis=-1)
     y = df["_target"].values
