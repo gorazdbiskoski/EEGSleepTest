@@ -1,8 +1,13 @@
-.venv
+venv/
+.venv/
+env/
+ENV/
 
-.idea
+__pycache__/
+*.py[cod]
+*$py.class
 
-sleep-edfx/
+.ipynb_checkpoints/
 
-optimization scripts/report.log
-report.log
+.DS_Store
+Thumbs.db

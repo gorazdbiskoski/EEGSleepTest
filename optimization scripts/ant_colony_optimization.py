@@ -39,7 +39,7 @@ EVAPORATION_RATE = 0.3
 ALPHA = 1.0
 Q = 1.0
 
-# ── visualisation setup ────────────────────────────────────────────────────────
+
 VIZ_DIR = os.path.join(os.path.dirname(__file__), 'convergence plots')
 os.makedirs(VIZ_DIR, exist_ok=True)
 
@@ -80,7 +80,6 @@ def _update_pheromone_heatmap(iteration):
     _im.set_data(_heat_matrix)
     ax_heat.set_title(f'ACO – Pheromone heatmap (iter {iteration})')
     fig_heat.savefig(os.path.join(VIZ_DIR, 'aco_pheromone_heatmap.png'), dpi=100)
-# ──────────────────────────────────────────────────────────────────────────────
 
 
 def choose_parameter(param_name):
