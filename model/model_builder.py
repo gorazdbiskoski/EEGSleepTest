@@ -1,11 +1,12 @@
 import numpy as np
+
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, LSTM, Dense, Dropout, BatchNormalization
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.backend import clear_session
 
 N_CLASSES = 5
-
 
 def prepare_data(X):
     if X.ndim == 3 and X.shape[1] < X.shape[2]:
@@ -15,6 +16,7 @@ def prepare_data(X):
 
 def build_model(params, input_shape):
     filters, kernel_size, lstm_units, dropout, lr, batch_size = params
+
     filters = int(filters)
     kernel_size = int(kernel_size)
     lstm_units = int(lstm_units)
@@ -23,8 +25,12 @@ def build_model(params, input_shape):
     clear_session()
 
     model = Sequential([
-        Conv1D(filters=filters, kernel_size=kernel_size, activation="relu",
-               padding="same", input_shape=input_shape),
+        Conv1D(filters=filters, kernel_size=kernel_size, activation="relu", padding="same", strides=2,
+               input_shape=input_shape),
+        BatchNormalization(),
+        MaxPooling1D(pool_size=2),
+        Dropout(dropout),
+        Conv1D(filters=filters, kernel_size=kernel_size, activation="relu", padding="same", strides=2),
         BatchNormalization(),
         MaxPooling1D(pool_size=2),
         Dropout(dropout),
@@ -39,28 +45,48 @@ def build_model(params, input_shape):
         loss="sparse_categorical_crossentropy",
         metrics=["accuracy"]
     )
+
     return model
 
 
-def evaluate_model(params, X_train, X_test, y_train, y_test, class_weight=None):
+def evaluate_model(
+    params,
+    X_train,
+    X_val,
+    y_train,
+    y_val,
+    class_weight=None
+):
     batch_size = int(params[5])
+
     X_train = prepare_data(X_train)
-    X_test = prepare_data(X_test)
+    X_val = prepare_data(X_val)
 
     model = build_model(params, X_train.shape[1:])
 
-    history = model.fit(
-        X_train, y_train,
-        epochs=20,
-        batch_size=batch_size,
-        validation_data=(X_test, y_test),
-        class_weight=class_weight,
-        verbose=0
+    early_stopping = EarlyStopping(
+        monitor="val_loss",
+        patience=2,
+        restore_best_weights=True
     )
 
-    return {
+    history = model.fit(
+        X_train,
+        y_train,
+        epochs=4,
+        batch_size=batch_size,
+        validation_data=(X_val, y_val),
+        class_weight=class_weight,
+        callbacks=[early_stopping],
+        verbose=1
+    )
+
+    result = {
         "val_loss": min(history.history["val_loss"]),
         "val_accuracy": max(history.history["val_accuracy"]),
-        "model": model,
-        "history": history
+        "epochs": len(history.history["loss"])
     }
+
+    clear_session()
+
+    return result

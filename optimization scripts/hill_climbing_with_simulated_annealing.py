@@ -2,6 +2,7 @@ import os
 import time
 import math
 import random
+import logging
 
 import numpy as np
 import pandas as pd
@@ -10,16 +11,14 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
-from model.data_loader import load_data
+from data.global_data_loader import get_data_all_datasets
 from model.model_builder import evaluate_model
 
-X, y = load_data()
-
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-
-results_log = []
+logger = logging.getLogger(__name__)
 
 PARAM_SPACE = {
     "filters": [16, 32, 64, 96, 128],
@@ -27,7 +26,7 @@ PARAM_SPACE = {
     "lstm_units": [32, 64, 96, 128],
     "dropout": [0.1, 0.2, 0.3, 0.4, 0.5],
     "learning_rate": [1e-4, 5e-4, 1e-3, 5e-3, 1e-2],
-    "batch_size": [16, 32, 48, 64]
+    "batch_size": [16, 32, 48, 64],
 }
 
 MAX_EVALS = 100
@@ -38,38 +37,15 @@ PERTURB_STRENGTH = 3
 PERTURB_DIMS = 2
 RANDOM_SEED = 42
 
-random.seed(RANDOM_SEED)
-np.random.seed(RANDOM_SEED)
-
-VIZ_DIR = os.path.join(os.path.dirname(__file__), 'convergence plots')
+BASE_DIR = os.path.dirname(__file__)
+RESULTS_DIR = os.path.join(BASE_DIR, '..', 'results')
+VIZ_DIR = os.path.join(BASE_DIR, 'convergence plots')
+os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(VIZ_DIR, exist_ok=True)
-
-fig_conv, ax_conv = plt.subplots(figsize=(8, 4))
-ax_conv.set_title('Basin Hopping (HC + SA) - Convergence')
-ax_conv.set_xlabel('Evaluation #')
-ax_conv.set_ylabel('Best val_loss')
-conv_x, conv_y = [], []
-(conv_line,) = ax_conv.plot([], [], marker='o', color='darkred')
-
-
-def _update_convergence(eval_num, best_loss):
-    conv_x.append(eval_num)
-    conv_y.append(best_loss)
-    conv_line.set_data(conv_x, conv_y)
-    ax_conv.relim()
-    ax_conv.autoscale_view()
-    fig_conv.tight_layout()
-    fig_conv.savefig(
-        os.path.join(VIZ_DIR, 'basin_hopping_convergence.png'),
-        dpi=100
-    )
 
 
 def random_individual():
-    return {
-        param: random.choice(values)
-        for param, values in PARAM_SPACE.items()
-    }
+    return {param: random.choice(values) for param, values in PARAM_SPACE.items()}
 
 
 def get_neighbors(individual):
@@ -97,87 +73,102 @@ def perturb(individual):
     return perturbed
 
 
-def evaluate_individual(individual):
+def evaluate_individual(individual, X_train, X_val, y_train, y_val):
     params = [
         int(individual["filters"]),
         int(individual["kernel_size"]),
         int(individual["lstm_units"]),
         float(individual["dropout"]),
         float(individual["learning_rate"]),
-        int(individual["batch_size"])
+        int(individual["batch_size"]),
     ]
-    return evaluate_model(params, X_train, X_test, y_train, y_test)
+    result = evaluate_model(params, X_train, X_val, y_train, y_val)
+    return result["val_loss"], result["val_accuracy"], result["epochs"]
 
 
-def log_trial(individual, loss, basin_id, phase):
-    results_log.append({
-        "filters": individual["filters"],
-        "kernel_size": individual["kernel_size"],
-        "lstm_units": individual["lstm_units"],
-        "dropout": individual["dropout"],
-        "learning_rate": individual["learning_rate"],
-        "batch_size": individual["batch_size"],
-        "val_loss": loss,
-        "basin_id": basin_id,
-        "phase": phase,
-        "method": "Basin Hopping"
-    })
+def create_visualisations(dataset_name):
+    fig_conv, ax_conv = plt.subplots(figsize=(8, 4))
+    ax_conv.set_title(f'Basin Hopping – Convergence ({dataset_name})')
+    ax_conv.set_xlabel('Evaluation #')
+    ax_conv.set_ylabel('Best val_loss')
+    conv_x, conv_y = [], []
+    (conv_line,) = ax_conv.plot([], [], marker='o', color='darkred')
+    return fig_conv, ax_conv, conv_x, conv_y, conv_line
 
 
-def append_best_to_summary(best_solution, best_loss, elapsed):
-    results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
-    os.makedirs(results_dir, exist_ok=True)
-    summary_path = os.path.join(results_dir, 'best_results.csv')
-    row = pd.DataFrame([{
-        "filters":        best_solution["filters"],
-        "kernel_size":    best_solution["kernel_size"],
-        "lstm_units":     best_solution["lstm_units"],
-        "dropout":        best_solution["dropout"],
-        "learning_rate":  best_solution["learning_rate"],
-        "batch_size":     best_solution["batch_size"],
-        "val_loss":       best_loss,
-        "method":         "Basin Hopping",
-        "execution_time": round(elapsed, 4),
-    }])
-    write_header = not os.path.exists(summary_path)
-    row.to_csv(summary_path, mode='a', header=write_header, index=False)
+def update_convergence(eval_num, best_loss, conv_x, conv_y, conv_line, ax_conv, fig_conv, dataset_name):
+    conv_x.append(eval_num)
+    conv_y.append(best_loss)
+    conv_line.set_data(conv_x, conv_y)
+    ax_conv.relim()
+    ax_conv.autoscale_view()
+    filename = f"basin_hopping_convergence_{dataset_name.lower().replace('-', '_')}.png"
+    fig_conv.savefig(os.path.join(VIZ_DIR, filename), dpi=100)
 
 
-def run_inner_hc(start, basin_id, state):
-    """
-    First-improvement hill climb starting from `start`.
-    Mutates `state` (evals_used, best_loss, best_solution) in place.
-    Returns (final_individual, final_loss) — the local minimum reached.
-    """
+def run_inner_hc(start, basin_id, state, X_train, X_val, y_train, y_val, results_log, dataset_name,
+                 conv_x, conv_y, conv_line, ax_conv, fig_conv):
     current = start
-    current_loss = evaluate_individual(current)
+    current_loss, current_acc, epochs = evaluate_individual(current, X_train, X_val, y_train, y_val)
     state["evals_used"] += 1
-    log_trial(current, current_loss, basin_id, phase="hc_start")
+
+    results_log.append({
+        "dataset": dataset_name,
+        "filters": current["filters"],
+        "kernel_size": current["kernel_size"],
+        "lstm_units": current["lstm_units"],
+        "dropout": current["dropout"],
+        "learning_rate": current["learning_rate"],
+        "batch_size": current["batch_size"],
+        "val_loss": current_loss,
+        "val_accuracy": current_acc,
+        "epochs_used": epochs,
+        "basin_id": basin_id,
+        "phase": "hc_start",
+        "method": "Basin Hopping",
+    })
 
     if current_loss < state["best_loss"]:
         state["best_loss"] = current_loss
+        state["best_accuracy"] = current_acc
         state["best_solution"] = current.copy()
 
-    _update_convergence(state["evals_used"], state["best_loss"])
+    update_convergence(state["evals_used"], state["best_loss"], conv_x, conv_y, conv_line, ax_conv, fig_conv, dataset_name)
 
     while state["evals_used"] < MAX_EVALS:
         neighbors = get_neighbors(current)
         random.shuffle(neighbors)
-
         improved = False
+
         for neighbor in neighbors:
             if state["evals_used"] >= MAX_EVALS:
                 return current, current_loss
 
-            n_loss = evaluate_individual(neighbor)
+            n_loss, n_acc, n_epochs = evaluate_individual(neighbor, X_train, X_val, y_train, y_val)
             state["evals_used"] += 1
-            log_trial(neighbor, n_loss, basin_id, phase="hc_step")
+
+            results_log.append({
+                "dataset": dataset_name,
+                "filters": neighbor["filters"],
+                "kernel_size": neighbor["kernel_size"],
+                "lstm_units": neighbor["lstm_units"],
+                "dropout": neighbor["dropout"],
+                "learning_rate": neighbor["learning_rate"],
+                "batch_size": neighbor["batch_size"],
+                "val_loss": n_loss,
+                "val_accuracy": n_acc,
+                "epochs_used": n_epochs,
+                "basin_id": basin_id,
+                "phase": "hc_step",
+                "method": "Basin Hopping",
+            })
 
             if n_loss < state["best_loss"]:
                 state["best_loss"] = n_loss
+                state["best_accuracy"] = n_acc
                 state["best_solution"] = neighbor.copy()
 
-            _update_convergence(state["evals_used"], state["best_loss"])
+            update_convergence(state["evals_used"], state["best_loss"], conv_x, conv_y, conv_line, ax_conv, fig_conv, dataset_name)
 
             if n_loss < current_loss:
                 current = neighbor
@@ -191,40 +182,54 @@ def run_inner_hc(start, basin_id, state):
     return current, current_loss
 
 
-if __name__ == "__main__":
-    start_time = time.perf_counter()
+def run_basin_hopping(dataset_name, X, y):
+    logger.info(f"Running Basin Hopping on {dataset_name}")
 
+    X_train_full, X_test, y_train_full, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_val, y_train, y_val = train_test_split(X_train_full, y_train_full, test_size=0.2, random_state=42)
+
+    logger.info(f"X_train: {X_train.shape}, X_val: {X_val.shape}, X_test: {X_test.shape}")
+
+    random.seed(RANDOM_SEED)
+    np.random.seed(RANDOM_SEED)
+
+    results_log = []
     state = {
         "evals_used": 0,
         "best_loss": float("inf"),
+        "best_accuracy": None,
         "best_solution": None,
     }
 
+    fig_conv, ax_conv, conv_x, conv_y, conv_line = create_visualisations(dataset_name)
+
+    start_time = time.perf_counter()
     basin_id = 0
     T = T_START
 
-    # Initial HC descent from a random start
+    # Initial HC
     basin_id += 1
     initial = random_individual()
-    launch, launch_loss = run_inner_hc(initial, basin_id, state)
-    print(
+    launch, launch_loss = run_inner_hc(
+        initial, basin_id, state, X_train, X_val, y_train, y_val,
+        results_log, dataset_name, conv_x, conv_y, conv_line, ax_conv, fig_conv
+    )
+    logger.info(
         f"Basin {basin_id} (eval {state['evals_used']}/{MAX_EVALS}) | "
-        f"Launch loss: {launch_loss:.6f} | T={T:.4f} | "
-        f"Best: {state['best_loss']:.6f}"
+        f"Launch loss: {launch_loss:.6f} | T={T:.4f} | Best: {state['best_loss']:.6f}"
     )
 
-    # Basin-hopping outer loop: perturb -> HC -> Metropolis accept
     while state["evals_used"] < MAX_EVALS:
         if T < T_MIN:
-            print(
-                f"Temperature below T_MIN ({T_MIN}), "
-                f"stopping at eval {state['evals_used']}."
-            )
+            logger.info(f"Temperature below T_MIN ({T_MIN}), stopping at eval {state['evals_used']}.")
             break
 
         basin_id += 1
         perturbed = perturb(launch)
-        candidate, candidate_loss = run_inner_hc(perturbed, basin_id, state)
+        candidate, candidate_loss = run_inner_hc(
+            perturbed, basin_id, state, X_train, X_val, y_train, y_val,
+            results_log, dataset_name, conv_x, conv_y, conv_line, ax_conv, fig_conv
+        )
 
         delta = candidate_loss - launch_loss
         accepted = delta < 0 or random.random() < math.exp(-delta / T)
@@ -233,33 +238,60 @@ if __name__ == "__main__":
             launch = candidate
             launch_loss = candidate_loss
 
-        print(
+        logger.info(
             f"Basin {basin_id} (eval {state['evals_used']}/{MAX_EVALS}) | "
-            f"Candidate loss: {candidate_loss:.6f} | "
-            f"delta={delta:+.4f} | T={T:.4f} | "
-            f"{'accepted' if accepted else 'rejected'} | "
-            f"Best: {state['best_loss']:.6f}"
+            f"Candidate: {candidate_loss:.6f} | delta={delta:+.4f} | T={T:.4f} | "
+            f"{'accepted' if accepted else 'rejected'} | Best: {state['best_loss']:.6f}"
         )
-
         T *= COOLING_RATE
 
     elapsed = time.perf_counter() - start_time
+    plt.close(fig_conv)
 
-    df = pd.DataFrame(results_log)
-    results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
-    os.makedirs(results_dir, exist_ok=True)
-    df.to_csv(
-        os.path.join(results_dir, 'basin_hopping_results.csv'),
-        index=False
-    )
+    return results_log, state["best_solution"], state["best_loss"], state["best_accuracy"], elapsed
 
-    append_best_to_summary(state["best_solution"], state["best_loss"], elapsed)
 
-    plt.close('all')
+def append_best_to_summary(best_solution, best_loss, best_accuracy, elapsed, dataset_name):
+    summary_path = os.path.join(RESULTS_DIR, 'best_results.csv')
+    row = pd.DataFrame([{
+        "dataset": dataset_name,
+        "filters": best_solution["filters"],
+        "kernel_size": best_solution["kernel_size"],
+        "lstm_units": best_solution["lstm_units"],
+        "dropout": best_solution["dropout"],
+        "learning_rate": best_solution["learning_rate"],
+        "batch_size": best_solution["batch_size"],
+        "val_loss": best_loss,
+        "val_accuracy": best_accuracy,
+        "method": "Basin Hopping",
+        "execution_time": round(elapsed, 4),
+    }])
+    write_header = not os.path.exists(summary_path)
+    row.to_csv(summary_path, mode="a", header=write_header, index=False)
 
-    print(f"\nBest Solution: {state['best_solution']}")
-    print(f"Best Validation Loss: {state['best_loss']:.6f}")
-    print(f"Final Temperature: {T:.6f}")
-    print(f"Total Basins Visited: {basin_id}")
-    print(f"Execution Time: {elapsed:.2f} seconds")
-    print(f"Visualisations saved to {VIZ_DIR}")
+
+if __name__ == "__main__":
+    sleep_edfx, haaglanden = get_data_all_datasets()
+    datasets = {"Sleep-EDF": sleep_edfx, "Haaglanden": haaglanden}
+
+    for dataset_name, dataset in datasets.items():
+        X, y = dataset
+        logger.info(f"{dataset_name}: X={X.shape}, y={y.shape}")
+
+        results, best_solution, best_loss, best_accuracy, elapsed = run_basin_hopping(dataset_name, X, y)
+
+        df = pd.DataFrame(results)
+        filename = f"basin_hopping_results_{dataset_name.lower().replace('-', '_')}.csv"
+        output_path = os.path.join(RESULTS_DIR, filename)
+        df.to_csv(output_path, index=False)
+
+        append_best_to_summary(best_solution, best_loss, best_accuracy, elapsed, dataset_name)
+
+        logger.info(f"{dataset_name} FINISHED")
+        logger.info(f"Best parameters: {best_solution}")
+        logger.info(f"Best val_loss: {best_loss:.6f}")
+        logger.info(f"Best val_accuracy: {best_accuracy:.6f}")
+        logger.info(f"Execution time: {elapsed:.2f} s")
+        logger.info(f"Results saved to: {output_path}")
+
+    logger.info("ALL DATASETS FINISHED")

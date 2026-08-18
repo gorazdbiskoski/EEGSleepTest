@@ -5,111 +5,131 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-
-from model.data_loader import load_data
-from model.model_builder import evaluate_model
 from sklearn.model_selection import train_test_split
+from data.global_data_loader import get_data_all_datasets
+from model.model_builder import evaluate_model
 
-X, y = load_data()
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
+PARAM_SPACE = {
+    "filters": [16, 32, 64],
+    "kernel_size": [1, 2, 5],
+    "lstm_units": [32, 64],
+    "dropout": [0.1, 0.3, 0.5],
+    "learning_rate": [0.01, 0.001, 0.0001],
+    "batch_size": [16, 32, 64]
+}
 
-results_log = []
-
-# 486 combinations
-space_filters = [16, 32, 64]
-space_kernel  = [1, 2, 5]
-space_lstm    = [32, 64]
-space_dropout = [0.1, 0.3, 0.5]
-space_lr      = [0.01, 0.001, 0.0001]
-space_batch   = [16, 32, 64]
-
+RESULTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'results')
 VIZ_DIR = os.path.join(os.path.dirname(__file__), 'convergence plots')
+
+os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(VIZ_DIR, exist_ok=True)
 
-fig_conv, ax_conv = plt.subplots(figsize=(8, 4))
-ax_conv.set_title('Grid Search – Convergence (running best val_loss)')
-ax_conv.set_xlabel('Trial #')
-ax_conv.set_ylabel('Best val_loss')
-conv_x, conv_y = [], []
-(conv_line,) = ax_conv.plot([], [], color='mediumpurple')
 
+def run_grid_search(dataset_name, X, y):
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-def _update_convergence(trial, best_loss):
-    conv_x.append(trial)
-    conv_y.append(best_loss)
-    conv_line.set_data(conv_x, conv_y)
-    ax_conv.relim()
-    ax_conv.autoscale_view()
-    fig_conv.tight_layout()
-    fig_conv.savefig(os.path.join(VIZ_DIR, 'grid_search_convergence.png'), dpi=100)
-
-
-def run_grid_search():
+    results_log = []
     best_loss = float('inf')
     best_params = None
+    conv_x, conv_y = [], []
+
+    fig_conv, ax_conv = plt.subplots(figsize=(8, 4))
+    ax_conv.set_title(f'Grid Search – Convergence ({dataset_name})')
+    ax_conv.set_xlabel('Trial #')
+    ax_conv.set_ylabel('Best val_loss')
+    conv_line, = ax_conv.plot([], [], color='mediumpurple')
+
+    def update_convergence(trial, current_best_loss):
+        conv_x.append(trial)
+        conv_y.append(current_best_loss)
+        conv_line.set_data(conv_x, conv_y)
+        ax_conv.relim()
+        ax_conv.autoscale_view()
+        fig_conv.tight_layout()
+        filename = f"grid_search_convergence_{dataset_name.lower().replace('-', '_')}.png"
+        fig_conv.savefig(os.path.join(VIZ_DIR, filename), dpi=100)
 
     all_combinations = list(itertools.product(
-        space_filters, space_kernel, space_lstm,
-        space_dropout, space_lr, space_batch
+        PARAM_SPACE["filters"],
+        PARAM_SPACE["kernel_size"],
+        PARAM_SPACE["lstm_units"],
+        PARAM_SPACE["dropout"],
+        PARAM_SPACE["learning_rate"],
+        PARAM_SPACE["batch_size"]
     ))
 
     total_trials = len(all_combinations)
-    print(f"Starting Grid Search. Total combinations to test: {total_trials}")
+    print(f"Starting Grid Search on {dataset_name}. Total combinations: {total_trials}")
+
+    start_time = time.perf_counter()
 
     for i, params in enumerate(all_combinations):
         f, k, u, d, lr, b = params
-
-        print(f"Trial {i+1}/{total_trials} | "
-              f"Filters={f}, Kernel={k}, LSTM={u}, Drop={d}, LR={lr}, Batch={b}")
+        print(f"Trial {i + 1}/{total_trials} | Filters={f}, Kernel={k}, LSTM={u}, Drop={d}, LR={lr}, Batch={b}")
 
         loss = evaluate_model(params, X_train, X_test, y_train, y_test)
         print(f"  -> Validation Loss: {loss:.4f}")
 
         results_log.append({
-            "filters": f, "kernel_size": k, "lstm_units": u,
-            "dropout": d, "learning_rate": lr, "batch_size": b,
-            "val_loss": loss, "method": "Grid Search"
+            "dataset": dataset_name,
+            "trial": i + 1,
+            "filters": f,
+            "kernel_size": k,
+            "lstm_units": u,
+            "dropout": d,
+            "learning_rate": lr,
+            "batch_size": b,
+            "val_loss": loss,
+            "method": "Grid Search"
         })
 
         if loss < best_loss:
             best_loss = loss
-            best_params = params
+            best_params = {
+                "filters": f,
+                "kernel_size": k,
+                "lstm_units": u,
+                "dropout": d,
+                "learning_rate": lr,
+                "batch_size": b
+            }
 
-        _update_convergence(i + 1, best_loss)
+        update_convergence(i + 1, best_loss)
 
-    return best_loss, best_params
+    elapsed = time.perf_counter() - start_time
+    plt.close(fig_conv)
+    return (results_log, best_params, best_loss, elapsed)
 
 
-def append_best_to_summary(best_params, best_loss, elapsed):
-    results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
-    os.makedirs(results_dir, exist_ok=True)
-    summary_path = os.path.join(results_dir, 'best_results.csv')
-    f, k, u, d, lr, b = best_params
+def append_best_to_summary(best_params, best_loss, elapsed, dataset_name):
+    summary_path = os.path.join(RESULTS_DIR, 'best_results.csv')
     row = pd.DataFrame([{
-        "filters": f, "kernel_size": k, "lstm_units": u,
-        "dropout": d, "learning_rate": lr, "batch_size": b,
-        "val_loss": best_loss, "method": "Grid Search",
-        "execution_time": round(elapsed, 4),
+        "dataset": dataset_name,
+        "filters": best_params["filters"],
+        "kernel_size": best_params["kernel_size"],
+        "lstm_units": best_params["lstm_units"],
+        "dropout": best_params["dropout"],
+        "learning_rate": best_params["learning_rate"],
+        "batch_size": best_params["batch_size"],
+        "val_loss": best_loss,
+        "method": "Grid Search",
+        "execution_time": round(elapsed, 4)
     }])
     write_header = not os.path.exists(summary_path)
     row.to_csv(summary_path, mode='a', header=write_header, index=False)
 
 
 if __name__ == "__main__":
-    start_time = time.perf_counter()
+    haaglanden, sleep_edfx = get_data_all_datasets()
+    datasets = {
+        "Haaglanden": haaglanden,
+        "Sleep-EDF": sleep_edfx
+    }
 
-    best_cost, best_pos = run_grid_search()
-
-    elapsed = time.perf_counter() - start_time
-
-    df = pd.DataFrame(results_log)
-    results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
-    os.makedirs(results_dir, exist_ok=True)
-    df.to_csv(os.path.join(results_dir, 'grid_search_results.csv'), index=False)
-
-    append_best_to_summary(best_pos, best_cost, elapsed)
-
-    plt.close('all')
-    print(f"Visualisations saved to {VIZ_DIR}")
+    for dataset_name, dataset in datasets.items():
+        X, y = dataset
+        (results, best_params, best_loss, elapsed) = run_grid_search(dataset_name, X, y)
+        df = pd.DataFrame(results)
+        filename = f"grid_search_results_{dataset_name.lower().replace('-', '_')}.csv"
+        df.to_csv(os.path.join(RESULTS_DIR, filename), index=False)
+        append_best_to_summary(best_params, best_loss, elapsed, dataset_name)

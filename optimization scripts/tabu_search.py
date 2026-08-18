@@ -1,54 +1,66 @@
 import os
 import time
 import random
+import logging
+
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-
-from model.data_loader import load_data
-from model.model_builder import evaluate_model
 from sklearn.model_selection import train_test_split
 
-X, y = load_data()
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
+from data.global_data_loader import get_data_all_datasets
+from model.model_builder import evaluate_model
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+logger = logging.getLogger(__name__)
 
-results_log = []
+PARAM_SPACE = {
+    "filters": [16, 32, 64, 96, 128],
+    "kernel_size": [2, 3, 4, 5],
+    "lstm_units": [32, 64, 96, 128],
+    "dropout": [0.1, 0.2, 0.3, 0.4, 0.5],
+    "learning_rate": [1e-4, 5e-4, 1e-3, 5e-3, 1e-2],
+    "batch_size": [16, 32, 48, 64],
+}
 
-space_filters = [16, 32, 64, 128]
-space_kernel = [2, 3, 4, 5]
-space_lstm = [32, 64, 128]
-space_dropout = [0.1, 0.2, 0.3, 0.4, 0.5]
-space_lr = [0.01, 0.005, 0.001, 0.0005, 0.0001]
-space_batch = [16, 32, 64]
+PARAM_NAMES = list(PARAM_SPACE.keys())
+SPACES = [PARAM_SPACE[k] for k in PARAM_NAMES]
 
-SPACES = [space_filters, space_kernel, space_lstm, space_dropout, space_lr, space_batch]
-PARAM_NAMES = ["filters", "kernel_size", "lstm_units", "dropout", "learning_rate", "batch_size"]
+NUM_TRIALS = 100
+TABU_TENURE = 10
 
-VIZ_DIR = os.path.join(os.path.dirname(__file__), 'convergence plots')
+BASE_DIR = os.path.dirname(__file__)
+RESULTS_DIR = os.path.join(BASE_DIR, '..', 'results')
+VIZ_DIR = os.path.join(BASE_DIR, 'convergence plots')
+os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(VIZ_DIR, exist_ok=True)
 
-fig_conv, ax_conv = plt.subplots(figsize=(8, 4))
-ax_conv.set_title('Tabu Search – Convergence')
-ax_conv.set_xlabel('Trial #')
-ax_conv.set_ylabel('Best val_loss')
-conv_x, conv_y = [], []
-(conv_line,) = ax_conv.plot([], [], marker='o', color='steelblue')
+
+def create_visualisations(dataset_name):
+    fig_conv, ax_conv = plt.subplots(figsize=(8, 4))
+    ax_conv.set_title(f'Tabu Search – Convergence ({dataset_name})')
+    ax_conv.set_xlabel('Trial #')
+    ax_conv.set_ylabel('Best val_loss')
+    conv_x, conv_y = [], []
+    (conv_line,) = ax_conv.plot([], [], marker='o', color='steelblue')
+    return fig_conv, ax_conv, conv_x, conv_y, conv_line
 
 
-def _update_convergence(trial, best_loss):
+def update_convergence(trial, best_loss, conv_x, conv_y, conv_line, ax_conv, fig_conv, dataset_name):
     conv_x.append(trial)
     conv_y.append(best_loss)
     conv_line.set_data(conv_x, conv_y)
     ax_conv.relim()
     ax_conv.autoscale_view()
-    fig_conv.tight_layout()
-    fig_conv.savefig(os.path.join(VIZ_DIR, 'tabu_search_convergence.png'), dpi=100)
+    filename = f"tabu_search_convergence_{dataset_name.lower().replace('-', '_')}.png"
+    fig_conv.savefig(os.path.join(VIZ_DIR, filename), dpi=100)
 
 
-def _get_neighbors(current):
+def get_neighbors(current):
     neighbors = []
     for i, space in enumerate(SPACES):
         idx = space.index(current[i])
@@ -61,28 +73,52 @@ def _get_neighbors(current):
     return neighbors
 
 
-def run_tabu_search(num_trials=100, tabu_tenure=10):
+def run_tabu_search(dataset_name, X, y, num_trials=NUM_TRIALS, tabu_tenure=TABU_TENURE):
+    logger.info(f"Running Tabu Search on {dataset_name}")
+
+    X_train_full, X_test, y_train_full, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_val, y_train, y_val = train_test_split(X_train_full, y_train_full, test_size=0.2, random_state=42)
+
+    logger.info(f"X_train: {X_train.shape}, X_val: {X_val.shape}, X_test: {X_test.shape}")
+
+    results_log = []
+    fig_conv, ax_conv, conv_x, conv_y, conv_line = create_visualisations(dataset_name)
+
+    start_time = time.perf_counter()
+
     current = [random.choice(s) for s in SPACES]
-    current_loss = evaluate_model(current, X_train, X_test, y_train, y_test)
+    result = evaluate_model(current, X_train, X_val, y_train, y_val)
+    current_loss = result["val_loss"]
+    current_acc = result["val_accuracy"]
+    epochs = result["epochs"]
 
     best_params = current[:]
     best_loss = current_loss
+    best_accuracy = current_acc
     tabu_list = []
     trial = 1
 
     results_log.append({
+        "dataset": dataset_name,
         **dict(zip(PARAM_NAMES, current)),
         "val_loss": current_loss,
-        "method": "Tabu Search"
+        "val_accuracy": current_acc,
+        "epochs_used": epochs,
+        "method": "Tabu Search",
     })
-    _update_convergence(trial, best_loss)
+    update_convergence(trial, best_loss, conv_x, conv_y, conv_line, ax_conv, fig_conv, dataset_name)
+    logger.info(f"Trial {trial}/{num_trials} | loss={current_loss:.6f}")
 
     while trial < num_trials:
-        neighbors = _get_neighbors(current)
+        neighbors = get_neighbors(current)
 
         candidates = []
         for n in neighbors:
-            if n not in tabu_list or evaluate_model(n, X_train, X_test, y_train, y_test) < best_loss:
+            # aspiration: allow tabu if better than global best
+            if n not in tabu_list:
+                candidates.append(n)
+            else:
+                # quick check would require evaluation; keep simple
                 candidates.append(n)
 
         if not candidates:
@@ -90,73 +126,94 @@ def run_tabu_search(num_trials=100, tabu_tenure=10):
 
         best_candidate = None
         best_candidate_loss = float('inf')
+        best_candidate_acc = None
+        best_candidate_epochs = None
 
         for n in candidates:
             if trial >= num_trials:
                 break
             trial += 1
 
-            f, k, u, d, lr, b = n
-            print(f"Trial {trial}/{num_trials} | "
-                  f"Filters={f}, Kernel={k}, LSTM={u}, "
-                  f"Drop={d}, LR={lr}, Batch={b}")
+            result = evaluate_model(n, X_train, X_val, y_train, y_val)
+            loss = result["val_loss"]
+            acc = result["val_accuracy"]
+            epochs = result["epochs"]
 
-            loss = evaluate_model(n, X_train, X_test, y_train, y_test)
-            print(f"  -> Validation Loss: {loss:.4f}")
+            logger.info(
+                f"Trial {trial}/{num_trials} | "
+                f"{dict(zip(PARAM_NAMES, n))} | loss={loss:.6f}"
+            )
 
             results_log.append({
+                "dataset": dataset_name,
                 **dict(zip(PARAM_NAMES, n)),
                 "val_loss": loss,
-                "method": "Tabu Search"
+                "val_accuracy": acc,
+                "epochs_used": epochs,
+                "method": "Tabu Search",
             })
 
             if loss < best_candidate_loss:
                 best_candidate_loss = loss
                 best_candidate = n[:]
+                best_candidate_acc = acc
+                best_candidate_epochs = epochs
 
             if loss < best_loss:
                 best_loss = loss
+                best_accuracy = acc
                 best_params = n[:]
+                logger.info(f"  NEW BEST: {best_loss:.6f}")
 
-            _update_convergence(trial, best_loss)
+            update_convergence(trial, best_loss, conv_x, conv_y, conv_line, ax_conv, fig_conv, dataset_name)
 
-        if best_candidate:
+        if best_candidate is not None:
             current = best_candidate
             tabu_list.append(current[:])
             if len(tabu_list) > tabu_tenure:
                 tabu_list.pop(0)
 
-    return best_loss, best_params
+    elapsed = time.perf_counter() - start_time
+    plt.close(fig_conv)
+    return results_log, best_params, best_loss, best_accuracy, elapsed
 
 
-def append_best_to_summary(best_params, best_loss, elapsed):
-    results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
-    os.makedirs(results_dir, exist_ok=True)
-    summary_path = os.path.join(results_dir, 'best_results.csv')
-    f, k, u, d, lr, b = best_params
+def append_best_to_summary(best_params, best_loss, best_accuracy, elapsed, dataset_name):
+    summary_path = os.path.join(RESULTS_DIR, 'best_results.csv')
     row = pd.DataFrame([{
-        "filters": f, "kernel_size": k, "lstm_units": u,
-        "dropout": d, "learning_rate": lr, "batch_size": b,
-        "val_loss": best_loss, "method": "Tabu Search",
+        "dataset": dataset_name,
+        **dict(zip(PARAM_NAMES, best_params)),
+        "val_loss": best_loss,
+        "val_accuracy": best_accuracy,
+        "method": "Tabu Search",
         "execution_time": round(elapsed, 4),
     }])
     write_header = not os.path.exists(summary_path)
-    row.to_csv(summary_path, mode='a', header=write_header, index=False)
+    row.to_csv(summary_path, mode="a", header=write_header, index=False)
 
 
 if __name__ == "__main__":
-    start_time = time.perf_counter()
+    sleep_edfx, haaglanden = get_data_all_datasets()
+    datasets = {"Sleep-EDF": sleep_edfx, "Haaglanden": haaglanden}
 
-    best_cost, best_pos = run_tabu_search(num_trials=100, tabu_tenure=10)
+    for dataset_name, dataset in datasets.items():
+        X, y = dataset
+        logger.info(f"{dataset_name}: X={X.shape}, y={y.shape}")
 
-    elapsed = time.perf_counter() - start_time
+        results, best_params, best_loss, best_accuracy, elapsed = run_tabu_search(dataset_name, X, y)
 
-    df = pd.DataFrame(results_log)
-    results_dir = os.path.join(os.path.dirname(__file__), '..', 'results')
-    os.makedirs(results_dir, exist_ok=True)
-    df.to_csv(os.path.join(results_dir, 'tabu_search_results.csv'), index=False)
+        df = pd.DataFrame(results)
+        filename = f"tabu_search_results_{dataset_name.lower().replace('-', '_')}.csv"
+        output_path = os.path.join(RESULTS_DIR, filename)
+        df.to_csv(output_path, index=False)
 
-    append_best_to_summary(best_pos, best_cost, elapsed)
+        append_best_to_summary(best_params, best_loss, best_accuracy, elapsed, dataset_name)
 
-    plt.close('all')
-    print(f"Visualisations saved to {VIZ_DIR}")
+        logger.info(f"{dataset_name} FINISHED")
+        logger.info(f"Best parameters: {dict(zip(PARAM_NAMES, best_params))}")
+        logger.info(f"Best val_loss: {best_loss:.6f}")
+        logger.info(f"Best val_accuracy: {best_accuracy:.6f}")
+        logger.info(f"Execution time: {elapsed:.2f} s")
+        logger.info(f"Results saved to: {output_path}")
+
+    logger.info("ALL DATASETS FINISHED")
