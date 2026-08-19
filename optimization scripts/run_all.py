@@ -6,7 +6,7 @@ OPTIMIZERS = [
     "bayesian_optimization_algorithm.py",
     "genetic_algorithm.py",
     "grid_search.py",
-    "hill_climbing_algorithm.py",
+    "hill_climbing.py",
     "hill_climbing_with_simulated_annealing.py",
     "pso_optimizer.py",
     "random_search.py",
