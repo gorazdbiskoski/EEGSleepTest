@@ -80,6 +80,15 @@ DATA_SLEEP_EDFX = os.getenv("DATA_SLEEP_EDFX")
 
 def load_data_sleep_edfx():
     data_dir = DATA_SLEEP_EDFX
+    if not data_dir:
+        raise RuntimeError(
+            "DATA_SLEEP_EDFX is not set. Copy .env.example to .env and "
+            "point DATA_SLEEP_EDFX at your dataset directory."
+        )
+    if not os.path.isdir(data_dir):
+        raise NotADirectoryError(
+            f"DATA_SLEEP_EDFX points at {data_dir!r}, which is not a directory."
+        )
     pairs = get_matched_pairs(data_dir)
     print(f"Found {len(pairs)} PSG/Hypnogram pairs")
 

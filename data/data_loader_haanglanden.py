@@ -102,6 +102,15 @@ DATA_HAANGLANDEN = os.getenv("DATA_HAANGLANDEN")
 
 def load_data_haaglanden():
     data_dir = DATA_HAANGLANDEN
+    if not data_dir:
+        raise RuntimeError(
+            "DATA_HAANGLANDEN is not set. Copy .env.example to .env and "
+            "point DATA_HAANGLANDEN at your dataset directory."
+        )
+    if not os.path.isdir(data_dir):
+        raise NotADirectoryError(
+            f"DATA_HAANGLANDEN points at {data_dir!r}, which is not a directory."
+        )
     pairs = get_matched_pairs(data_dir)
     print(f"Found {len(pairs)} PSG/Hypnogram pairs")
 
