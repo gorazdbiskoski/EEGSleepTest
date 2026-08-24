@@ -14,3 +14,8 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .idea/
+
+datasets/
+
+data/cache/
+results/logs/
