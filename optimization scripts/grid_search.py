@@ -1,4 +1,11 @@
 import os
+import sys
+
+# Allow running this script directly (outside PyCharm), which otherwise puts
+# only this folder on sys.path and cannot import the repo-root `data`/`model`.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import os
 import time
 import itertools
 import pandas as pd
@@ -8,14 +15,20 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from data.global_data_loader import get_data_all_datasets
 from model.model_builder import evaluate_model
+from results_io import append_best_row
 
+# 2*2*2*2*3*2 = 96 combinations, in line with the ~100-evaluation budget the
+# other optimizers use. Every value is drawn from the shared PARAM_SPACE the
+# other eight scripts search, so results stay directly comparable. The previous
+# grid was 486 combinations and was the only one offering kernel_size=1, a
+# degenerate convolution no other optimizer could select.
 PARAM_SPACE = {
-    "filters": [16, 32, 64],
-    "kernel_size": [1, 2, 5],
+    "filters": [16, 64],
+    "kernel_size": [2, 5],
     "lstm_units": [32, 64],
-    "dropout": [0.1, 0.3, 0.5],
+    "dropout": [0.1, 0.3],
     "learning_rate": [0.01, 0.001, 0.0001],
-    "batch_size": [16, 32, 64]
+    "batch_size": [16, 64]
 }
 
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'results')
@@ -25,11 +38,12 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(VIZ_DIR, exist_ok=True)
 
 
-def run_grid_search(dataset_name, X, y):
+def   run_grid_search(dataset_name, X, y):
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     results_log = []
     best_loss = float('inf')
+    best_accuracy = None
     best_params = None
     conv_x, conv_y = [], []
 
@@ -67,8 +81,10 @@ def run_grid_search(dataset_name, X, y):
         f, k, u, d, lr, b = params
         print(f"Trial {i + 1}/{total_trials} | Filters={f}, Kernel={k}, LSTM={u}, Drop={d}, LR={lr}, Batch={b}")
 
-        loss = evaluate_model(params, X_train, X_test, y_train, y_test)
-        print(f"  -> Validation Loss: {loss:.4f}")
+        result = evaluate_model(params, X_train, X_test, y_train, y_test)
+        loss = result["val_loss"]
+        acc = result["val_accuracy"]
+        print(f"  -> Validation Loss: {loss:.4f} | Accuracy: {acc:.4f}")
 
         results_log.append({
             "dataset": dataset_name,
@@ -80,11 +96,14 @@ def run_grid_search(dataset_name, X, y):
             "learning_rate": lr,
             "batch_size": b,
             "val_loss": loss,
+            "val_accuracy": acc,
+            "epochs_used": result["epochs"],
             "method": "Grid Search"
         })
 
         if loss < best_loss:
             best_loss = loss
+            best_accuracy = acc
             best_params = {
                 "filters": f,
                 "kernel_size": k,
@@ -98,10 +117,10 @@ def run_grid_search(dataset_name, X, y):
 
     elapsed = time.perf_counter() - start_time
     plt.close(fig_conv)
-    return (results_log, best_params, best_loss, elapsed)
+    return (results_log, best_params, best_loss, best_accuracy, elapsed)
 
 
-def append_best_to_summary(best_params, best_loss, elapsed, dataset_name):
+def append_best_to_summary(best_params, best_loss, best_accuracy, elapsed, dataset_name):
     summary_path = os.path.join(RESULTS_DIR, 'best_results.csv')
     row = pd.DataFrame([{
         "dataset": dataset_name,
@@ -112,11 +131,11 @@ def append_best_to_summary(best_params, best_loss, elapsed, dataset_name):
         "learning_rate": best_params["learning_rate"],
         "batch_size": best_params["batch_size"],
         "val_loss": best_loss,
+        "val_accuracy": best_accuracy,
         "method": "Grid Search",
         "execution_time": round(elapsed, 4)
     }])
-    write_header = not os.path.exists(summary_path)
-    row.to_csv(summary_path, mode='a', header=write_header, index=False)
+    append_best_row(summary_path, row)
 
 
 if __name__ == "__main__":
@@ -128,8 +147,8 @@ if __name__ == "__main__":
 
     for dataset_name, dataset in datasets.items():
         X, y = dataset
-        (results, best_params, best_loss, elapsed) = run_grid_search(dataset_name, X, y)
+        (results, best_params, best_loss, best_accuracy, elapsed) = run_grid_search(dataset_name, X, y)
         df = pd.DataFrame(results)
         filename = f"grid_search_results_{dataset_name.lower().replace('-', '_')}.csv"
         df.to_csv(os.path.join(RESULTS_DIR, filename), index=False)
-        append_best_to_summary(best_params, best_loss, elapsed, dataset_name)
+        append_best_to_summary(best_params, best_loss, best_accuracy, elapsed, dataset_name)

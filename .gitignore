@@ -19,3 +19,5 @@ datasets/
 
 data/cache/
 results/logs/
+
+report.log

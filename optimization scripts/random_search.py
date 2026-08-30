@@ -1,4 +1,11 @@
 import os
+import sys
+
+# Allow running this script directly (outside PyCharm), which otherwise puts
+# only this folder on sys.path and cannot import the repo-root `data`/`model`.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import os
 import time
 import random
 import logging
@@ -11,6 +18,7 @@ from sklearn.model_selection import train_test_split
 
 from data.global_data_loader import get_data_all_datasets
 from model.model_builder import evaluate_model
+from results_io import append_best_row
 
 logging.basicConfig(
     level=logging.INFO,
@@ -125,8 +133,7 @@ def append_best_to_summary(best_params, best_loss, best_accuracy, elapsed, datas
         "method": "Random Search",
         "execution_time": round(elapsed, 4),
     }])
-    write_header = not os.path.exists(summary_path)
-    row.to_csv(summary_path, mode="a", header=write_header, index=False)
+    append_best_row(summary_path, row)
 
 
 if __name__ == "__main__":

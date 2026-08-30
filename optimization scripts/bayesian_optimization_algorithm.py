@@ -1,4 +1,11 @@
 import os
+import sys
+
+# Allow running this script directly (outside PyCharm), which otherwise puts
+# only this folder on sys.path and cannot import the repo-root `data`/`model`.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import os
 import time
 import pandas as pd
 import matplotlib
@@ -8,6 +15,7 @@ from bayes_opt import BayesianOptimization
 from sklearn.model_selection import train_test_split
 from data.global_data_loader import get_data_all_datasets
 from model.model_builder import evaluate_model
+from results_io import append_best_row
 
 PARAM_BOUNDS = {
     "filters": (16, 128),
@@ -33,6 +41,7 @@ def run_bayesian_optimization(dataset_name, X, y):
     conv_y = []
     probe_counter = [0]
     running_best = [float('inf')]
+    best_accuracy = [None]
 
     fig_conv, ax_conv = plt.subplots(figsize=(8, 4))
     ax_conv.set_title(f'Bayesian Optimisation – {dataset_name}')
@@ -59,7 +68,9 @@ def run_bayesian_optimization(dataset_name, X, y):
             float(learning_rate),
             int(batch_size)
         ]
-        loss = evaluate_model(params, X_train, X_test, y_train, y_test)
+        result = evaluate_model(params, X_train, X_test, y_train, y_test)
+        loss = result["val_loss"]
+        acc = result["val_accuracy"]
 
         results_log.append({
             "dataset": dataset_name,
@@ -71,12 +82,15 @@ def run_bayesian_optimization(dataset_name, X, y):
             "learning_rate": float(learning_rate),
             "batch_size": int(batch_size),
             "val_loss": loss,
+            "val_accuracy": acc,
+            "epochs_used": result["epochs"],
             "method": "Bayesian Optimization"
         })
 
         probe_counter[0] += 1
         if loss < running_best[0]:
             running_best[0] = loss
+            best_accuracy[0] = acc
         update_convergence(probe_counter[0], running_best[0])
         return -loss
 
@@ -91,10 +105,10 @@ def run_bayesian_optimization(dataset_name, X, y):
     best_params = best_result["params"]
 
     plt.close(fig_conv)
-    return (results_log, best_params, best_loss, elapsed)
+    return (results_log, best_params, best_loss, best_accuracy[0], elapsed)
 
 
-def append_best_to_summary(best_params, best_loss, elapsed, dataset_name):
+def append_best_to_summary(best_params, best_loss, best_accuracy, elapsed, dataset_name):
     summary_path = os.path.join(RESULTS_DIR, 'best_results.csv')
     row = pd.DataFrame([{
         "dataset": dataset_name,
@@ -105,11 +119,11 @@ def append_best_to_summary(best_params, best_loss, elapsed, dataset_name):
         "learning_rate": float(best_params["learning_rate"]),
         "batch_size": int(best_params["batch_size"]),
         "val_loss": best_loss,
+        "val_accuracy": best_accuracy,
         "method": "Bayesian Optimization",
         "execution_time": round(elapsed, 4)
     }])
-    write_header = not os.path.exists(summary_path)
-    row.to_csv(summary_path, mode='a', header=write_header, index=False)
+    append_best_row(summary_path, row)
 
 
 if __name__ == "__main__":
@@ -121,8 +135,8 @@ if __name__ == "__main__":
 
     for dataset_name, dataset in datasets.items():
         X, y = dataset
-        (results, best_params, best_loss, elapsed) = run_bayesian_optimization(dataset_name, X, y)
+        (results, best_params, best_loss, best_accuracy, elapsed) = run_bayesian_optimization(dataset_name, X, y)
         df = pd.DataFrame(results)
         filename = f"bayesian_optimization_results_{dataset_name.lower().replace('-', '_')}.csv"
         df.to_csv(os.path.join(RESULTS_DIR, filename), index=False)
-        append_best_to_summary(best_params, best_loss, elapsed, dataset_name)
+        append_best_to_summary(best_params, best_loss, best_accuracy, elapsed, dataset_name)
