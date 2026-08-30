@@ -1,24 +1,28 @@
 import os
-import gc
-import warnings
-import mne
-import numpy as np
 
-warnings.filterwarnings("ignore", message="Channels contain different highpass filters")
-warnings.filterwarnings("ignore", message="Channels contain different lowpass filters")
+from dotenv import load_dotenv
 
-STAGE_MAPPING = {
-    "Sleep stage W": 0,
-    "Sleep stage 1": 1,
-    "Sleep stage 2": 2,
-    "Sleep stage 3": 3,
-    "Sleep stage 4": 3,
-    "Sleep stage R": 4,
-}
+from data.edf_common import (
+    SAMPLES_PER_EPOCH,
+    STAGE_MAPPING,
+    TARGET_SFREQ,
+    create_epochs,
+    load_dataset,
+    load_eeg as _load_eeg,
+    load_hypnogram,
+    normalize_epochs,
+    warn_about_orphans,
+)
+
+load_dotenv()
 
 EEG_CHANNELS = ["EEG Fpz-Cz", "EEG Pz-Oz"]
-TARGET_SFREQ = 100
-SAMPLES_PER_EPOCH = 30 * TARGET_SFREQ
+
+DATA_SLEEP_EDFX = os.getenv("DATA_SLEEP_EDFX")
+
+
+def load_eeg(path):
+    return _load_eeg(path, EEG_CHANNELS)
 
 
 def get_matched_pairs(data_dir):
@@ -37,48 +41,13 @@ def get_matched_pairs(data_dir):
             elif file.endswith("-Hypnogram.edf"):
                 key = file[:6]
                 hyp_files[key] = path
-    return [(psg_files[key], hyp_files[key]) for key in psg_files if key in hyp_files]
+
+    warn_about_orphans(psg_files, hyp_files, "Sleep-EDF")
+
+    return [(psg_files[key], hyp_files[key]) for key in sorted(psg_files) if key in hyp_files]
 
 
-def load_hypnogram(path):
-    annotations = mne.read_annotations(path)
-    stages = []
-    for desc, duration in zip(annotations.description, annotations.duration):
-        if desc in STAGE_MAPPING:
-            stages.extend([STAGE_MAPPING[desc]] * int(duration // 30))
-    return np.array(stages)
-
-
-def load_eeg(path):
-    raw = mne.io.read_raw_edf(path, preload=False, verbose=False)
-    raw.pick(EEG_CHANNELS)
-    raw.load_data()
-    raw.resample(TARGET_SFREQ)
-    return raw.get_data().astype(np.float32)
-
-
-def create_epochs(eeg):
-    n_epochs = eeg.shape[1] // SAMPLES_PER_EPOCH
-    eeg = eeg[:, :n_epochs * SAMPLES_PER_EPOCH]
-    epochs = eeg.reshape(eeg.shape[0], n_epochs, SAMPLES_PER_EPOCH)
-    return np.transpose(epochs, (1, 0, 2))
-
-
-def normalize_epochs(X):
-    if len(X) == 0:
-        return X
-    mean = X.mean(axis=-1, keepdims=True)
-    std = X.std(axis=-1, keepdims=True)
-    return ((X - mean) / (std + 1e-8)).astype(np.float32)
-
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-DATA_SLEEP_EDFX = os.getenv("DATA_SLEEP_EDFX")
-
-def load_data_sleep_edfx():
+def load_data_sleep_edfx(n_samples=None, random_state=42):
     data_dir = DATA_SLEEP_EDFX
     if not data_dir:
         raise RuntimeError(
@@ -100,43 +69,17 @@ def load_data_sleep_edfx():
             f"6 chars) actually matches between the two files."
         )
 
-    n_channels = len(EEG_CHANNELS)
+    return load_dataset(
+        pairs,
+        channels=EEG_CHANNELS,
+        dataset_label="Sleep-EDF",
+        n_samples=n_samples,
+        random_state=random_state,
+    )
 
-    epoch_counts = []
-    for i, (psg_path, hyp_path) in enumerate(pairs, start=1):
-        print(f"Counting {i}/{len(pairs)}: {os.path.basename(psg_path)}")
-        eeg = load_eeg(psg_path)
-        n_eeg_epochs = eeg.shape[1] // SAMPLES_PER_EPOCH
-        labels = load_hypnogram(hyp_path)
-        n = min(n_eeg_epochs, len(labels))
-        epoch_counts.append(n)
-        del eeg, labels
-        gc.collect()
 
-    total_epochs = sum(epoch_counts)
-    print(f"Total epochs across all files: {total_epochs}")
-
-    X = np.empty((total_epochs, n_channels, SAMPLES_PER_EPOCH), dtype=np.float32)
-    y = np.empty((total_epochs,), dtype=np.int64)
-
-    offset = 0
-    for i, ((psg_path, hyp_path), n) in enumerate(zip(pairs, epoch_counts), start=1):
-        print(f"Loading {i}/{len(pairs)}: {os.path.basename(psg_path)}")
-        eeg = load_eeg(psg_path)
-        epochs = create_epochs(eeg)
-        labels = load_hypnogram(hyp_path)
-
-        X[offset:offset + n] = epochs[:n]
-        y[offset:offset + n] = labels[:n]
-        offset += n
-
-        del eeg, epochs, labels
-        gc.collect()
-
-    X = normalize_epochs(X)
-
-    print("\nFinished loading")
-    print("X shape:", X.shape)
-    print("y shape:", y.shape)
-
-    return X, y
+if __name__ == "__main__":
+    X, y = load_data_sleep_edfx()
+    print("\nExample:")
+    print("First epoch shape:", X[0].shape)
+    print("First label:", y[0])
