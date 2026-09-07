@@ -120,14 +120,12 @@ def run_tabu_search(dataset_name, X, y, num_trials=NUM_TRIALS, tabu_tenure=TABU_
     while trial < num_trials:
         neighbors = get_neighbors(current)
 
-        candidates = []
-        for n in neighbors:
-            # aspiration: allow tabu if better than global best
-            if n not in tabu_list:
-                candidates.append(n)
-            else:
-                # quick check would require evaluation; keep simple
-                candidates.append(n)
+        # Exclude neighbours on the tabu list. Both branches of the previous
+        # test appended unconditionally, so the list was maintained but never
+        # filtered anything and the search kept re-walking solutions it had
+        # just left -- the whole point of the tenure. If every neighbour is
+        # tabu, fall back to the full neighbourhood rather than stalling.
+        candidates = [n for n in neighbors if n not in tabu_list]
 
         if not candidates:
             candidates = neighbors
