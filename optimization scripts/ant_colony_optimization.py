@@ -465,7 +465,7 @@ def append_best_to_summary(
 
 
 if __name__ == "__main__":
-    sleep_edfx,haaglanden = get_data_all_datasets()
+    haaglanden, sleep_edfx = get_data_all_datasets()
 
     datasets = {
         "Sleep-EDF": sleep_edfx,
