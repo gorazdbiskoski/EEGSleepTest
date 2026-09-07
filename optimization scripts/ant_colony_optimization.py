@@ -41,10 +41,11 @@ PARAM_SPACE = {
     "batch_size": [16, 32, 48, 64]
 }
 
-# Start small to test the implementation.
-# Once everything works, increase to 5/5 and eventually 10/10.
-NUM_ANTS = 3
-NUM_ITERATIONS = 2
+# 10 ants x 10 iterations = 100 evaluations, the same budget every other
+# optimizer gets. This was left at 3x2 (6 evaluations) from implementation
+# testing, which made ACO's results incomparable with the other nine.
+NUM_ANTS = 10
+NUM_ITERATIONS = 10
 
 EVAPORATION_RATE = 0.3
 ALPHA = 1.0

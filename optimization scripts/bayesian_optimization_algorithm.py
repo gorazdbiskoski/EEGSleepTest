@@ -27,6 +27,11 @@ PARAM_BOUNDS = {
     "batch_size": (16, 64)
 }
 
+# 20 random probes to seed the surrogate, then 80 GP-guided ones = 100
+# evaluations. Was 5+10=15, a sixth of what the other optimizers spent.
+INIT_POINTS = 20
+N_ITER = 80
+
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'results')
 VIZ_DIR = os.path.join(os.path.dirname(__file__), 'convergence plots')
 
@@ -102,7 +107,7 @@ def run_bayesian_optimization(dataset_name, X, y):
     optimizer = BayesianOptimization(f=objective_function, pbounds=PARAM_BOUNDS, random_state=42, verbose=0)
 
     start_time = time.perf_counter()
-    optimizer.maximize(init_points=5, n_iter=10)
+    optimizer.maximize(init_points=INIT_POINTS, n_iter=N_ITER)
     elapsed = time.perf_counter() - start_time
 
     best_result = optimizer.max
