@@ -42,7 +42,12 @@ def run_hill_climbing(dataset_name, X, y):
     random.seed(RANDOM_SEED)
     np.random.seed(RANDOM_SEED)
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # First split holds out a test set the search never sees; the second
+    # carves off the validation set every trial is scored on. The six other
+    # optimizers already did this -- tuning directly against X_test made
+    # their val_loss figures incomparable with these.
+    X_train_full, X_test, y_train_full, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_val, y_train, y_val = train_test_split(X_train_full, y_train_full, test_size=0.2, random_state=42)
 
     results_log = []
     best_loss = float("inf")
@@ -90,7 +95,7 @@ def run_hill_climbing(dataset_name, X, y):
             float(individual["learning_rate"]),
             int(individual["batch_size"])
         ]
-        return evaluate_model(params, X_train, X_test, y_train, y_test)
+        return evaluate_model(params, X_train, X_val, y_train, y_val)
 
     def log_trial(individual, result, restart_id, eval_num):
         results_log.append({

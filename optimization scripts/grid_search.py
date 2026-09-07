@@ -40,7 +40,12 @@ os.makedirs(VIZ_DIR, exist_ok=True)
 
 
 def   run_grid_search(dataset_name, X, y):
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # First split holds out a test set the search never sees; the second
+    # carves off the validation set every trial is scored on. The six other
+    # optimizers already did this -- tuning directly against X_test made
+    # their val_loss figures incomparable with these.
+    X_train_full, X_test, y_train_full, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_val, y_train, y_val = train_test_split(X_train_full, y_train_full, test_size=0.2, random_state=42)
 
     results_log = []
     best_loss = float('inf')
@@ -82,7 +87,7 @@ def   run_grid_search(dataset_name, X, y):
         f, k, u, d, lr, b = params
         print(f"Trial {i + 1}/{total_trials} | Filters={f}, Kernel={k}, LSTM={u}, Drop={d}, LR={lr}, Batch={b}")
 
-        result = evaluate_model(params, X_train, X_test, y_train, y_test)
+        result = evaluate_model(params, X_train, X_val, y_train, y_val)
         loss = result["val_loss"]
         acc = result["val_accuracy"]
         print(f"  -> Validation Loss: {loss:.4f} | Accuracy: {acc:.4f}")
