@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 from data.global_data_loader import get_data_all_datasets
+from model.metrics import metrics_from
 from model.model_builder import evaluate_model
 from results_io import append_best_row
 
@@ -108,18 +109,12 @@ def evaluate_solution(
         int(solution["batch_size"])
     ]
 
-    result = evaluate_model(
+    return evaluate_model(
         params,
         X_train,
         X_val,
         y_train,
         y_val
-    )
-
-    return (
-        result["val_loss"],
-        result["val_accuracy"],
-        result["epochs"]
     )
 
 
@@ -292,7 +287,7 @@ def run_aco(dataset_name, X, y):
 
     best_loss = float("inf")
     best_solution = None
-    best_accuracy = None
+    best_metrics = None
 
     param_names = list(PARAM_SPACE.keys())
 
@@ -324,13 +319,14 @@ def run_aco(dataset_name, X, y):
 
             ant_start = time.perf_counter()
 
-            loss, accuracy, epochs_used = evaluate_solution(
+            result = evaluate_solution(
                 solution,
                 X_train,
                 X_val,
                 y_train,
                 y_val
             )
+            loss = result["val_loss"]
 
             ant_elapsed = (
                 time.perf_counter() - ant_start
@@ -338,9 +334,9 @@ def run_aco(dataset_name, X, y):
 
             logger.info(f"val_loss: {loss:.6f}")
 
-            logger.info(f"val_accuracy: {accuracy:.6f}")
+            logger.info(f"val_accuracy: {result['val_accuracy']:.6f}")
 
-            print(f"epochs used: {epochs_used}")
+            print(f"epochs used: {result['epochs']}")
             print(f"time: {ant_elapsed:.2f} seconds")
 
             results_log.append({
@@ -354,8 +350,8 @@ def run_aco(dataset_name, X, y):
                 "learning_rate": solution["learning_rate"],
                 "batch_size": solution["batch_size"],
                 "val_loss": loss,
-                "val_accuracy": accuracy,
-                "epochs_used": epochs_used,
+                **metrics_from(result),
+                "epochs_used": result["epochs"],
                 "method": "ACO"
             })
 
@@ -366,7 +362,7 @@ def run_aco(dataset_name, X, y):
             if loss < best_loss:
                 best_loss = loss
                 best_solution = solution.copy()
-                best_accuracy = accuracy
+                best_metrics = metrics_from(result)
 
                 logger.info(f"NEW BEST: "f"{best_loss:.6f}")
 
@@ -414,7 +410,12 @@ def run_aco(dataset_name, X, y):
 
         logger.info(
             f"Best accuracy: "
-            f"{best_accuracy:.6f}"
+            f"{best_metrics['val_accuracy']:.6f}"
+        )
+
+        logger.info(
+            f"Best macro F1: "
+            f"{best_metrics['f1']:.6f}"
         )
 
         logger.info(f"Best parameters: "
@@ -430,7 +431,7 @@ def run_aco(dataset_name, X, y):
         results_log,
         best_solution,
         best_loss,
-        best_accuracy,
+        best_metrics,
         elapsed
     )
 
@@ -438,7 +439,7 @@ def run_aco(dataset_name, X, y):
 def append_best_to_summary(
     best_solution,
     best_loss,
-    best_accuracy,
+    best_metrics,
     elapsed,
     dataset_name
 ):
@@ -456,7 +457,7 @@ def append_best_to_summary(
         "learning_rate": best_solution["learning_rate"],
         "batch_size": best_solution["batch_size"],
         "val_loss": best_loss,
-        "val_accuracy": best_accuracy,
+        **best_metrics,
         "method": "ACO",
         "execution_time": round(elapsed, 4)
     }])
@@ -485,7 +486,7 @@ if __name__ == "__main__":
             results,
             best_solution,
             best_loss,
-            best_accuracy,
+            best_metrics,
             elapsed
         ) = run_aco(
             dataset_name,
@@ -513,7 +514,7 @@ if __name__ == "__main__":
         append_best_to_summary(
             best_solution,
             best_loss,
-            best_accuracy,
+            best_metrics,
             elapsed,
             dataset_name
         )
@@ -521,7 +522,8 @@ if __name__ == "__main__":
         logger.info(f"{dataset_name} FINISHED")
         logger.info(f"Best parameters: {best_solution}")
         logger.info(f"Best val_loss: {best_loss:.6f}")
-        logger.info(f"Best val_accuracy: {best_accuracy:.6f}")
+        logger.info(f"Best val_accuracy: {best_metrics['val_accuracy']:.6f}")
+        logger.info(f"Best macro F1: {best_metrics['f1']:.6f}")
         logger.info(f"Execution time: {elapsed:.2f} seconds")
         logger.info(f"Results saved to: {output_path}")
 

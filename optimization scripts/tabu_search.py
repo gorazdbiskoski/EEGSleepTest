@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 from data.global_data_loader import get_data_all_datasets
+from model.metrics import metrics_from
 from model.model_builder import evaluate_model
 from results_io import append_best_row
 
@@ -97,12 +98,11 @@ def run_tabu_search(dataset_name, X, y, num_trials=NUM_TRIALS, tabu_tenure=TABU_
     current = [random.choice(s) for s in SPACES]
     result = evaluate_model(current, X_train, X_val, y_train, y_val)
     current_loss = result["val_loss"]
-    current_acc = result["val_accuracy"]
     epochs = result["epochs"]
 
     best_params = current[:]
     best_loss = current_loss
-    best_accuracy = current_acc
+    best_metrics = metrics_from(result)
     tabu_list = []
     trial = 1
 
@@ -110,7 +110,7 @@ def run_tabu_search(dataset_name, X, y, num_trials=NUM_TRIALS, tabu_tenure=TABU_
         "dataset": dataset_name,
         **dict(zip(PARAM_NAMES, current)),
         "val_loss": current_loss,
-        "val_accuracy": current_acc,
+        **metrics_from(result),
         "epochs_used": epochs,
         "method": "Tabu Search",
     })
@@ -134,8 +134,6 @@ def run_tabu_search(dataset_name, X, y, num_trials=NUM_TRIALS, tabu_tenure=TABU_
 
         best_candidate = None
         best_candidate_loss = float('inf')
-        best_candidate_acc = None
-        best_candidate_epochs = None
 
         for n in candidates:
             if trial >= num_trials:
@@ -144,7 +142,6 @@ def run_tabu_search(dataset_name, X, y, num_trials=NUM_TRIALS, tabu_tenure=TABU_
 
             result = evaluate_model(n, X_train, X_val, y_train, y_val)
             loss = result["val_loss"]
-            acc = result["val_accuracy"]
             epochs = result["epochs"]
 
             logger.info(
@@ -156,7 +153,7 @@ def run_tabu_search(dataset_name, X, y, num_trials=NUM_TRIALS, tabu_tenure=TABU_
                 "dataset": dataset_name,
                 **dict(zip(PARAM_NAMES, n)),
                 "val_loss": loss,
-                "val_accuracy": acc,
+                **metrics_from(result),
                 "epochs_used": epochs,
                 "method": "Tabu Search",
             })
@@ -164,12 +161,10 @@ def run_tabu_search(dataset_name, X, y, num_trials=NUM_TRIALS, tabu_tenure=TABU_
             if loss < best_candidate_loss:
                 best_candidate_loss = loss
                 best_candidate = n[:]
-                best_candidate_acc = acc
-                best_candidate_epochs = epochs
 
             if loss < best_loss:
                 best_loss = loss
-                best_accuracy = acc
+                best_metrics = metrics_from(result)
                 best_params = n[:]
                 logger.info(f"  NEW BEST: {best_loss:.6f}")
 
@@ -183,16 +178,16 @@ def run_tabu_search(dataset_name, X, y, num_trials=NUM_TRIALS, tabu_tenure=TABU_
 
     elapsed = time.perf_counter() - start_time
     plt.close(fig_conv)
-    return results_log, best_params, best_loss, best_accuracy, elapsed
+    return results_log, best_params, best_loss, best_metrics, elapsed
 
 
-def append_best_to_summary(best_params, best_loss, best_accuracy, elapsed, dataset_name):
+def append_best_to_summary(best_params, best_loss, best_metrics, elapsed, dataset_name):
     summary_path = os.path.join(RESULTS_DIR, 'best_results.csv')
     row = pd.DataFrame([{
         "dataset": dataset_name,
         **dict(zip(PARAM_NAMES, best_params)),
         "val_loss": best_loss,
-        "val_accuracy": best_accuracy,
+        **best_metrics,
         "method": "Tabu Search",
         "execution_time": round(elapsed, 4),
     }])
@@ -207,19 +202,20 @@ if __name__ == "__main__":
         X, y = dataset
         logger.info(f"{dataset_name}: X={X.shape}, y={y.shape}")
 
-        results, best_params, best_loss, best_accuracy, elapsed = run_tabu_search(dataset_name, X, y)
+        results, best_params, best_loss, best_metrics, elapsed = run_tabu_search(dataset_name, X, y)
 
         df = pd.DataFrame(results)
         filename = f"tabu_search_results_{dataset_name.lower().replace('-', '_')}.csv"
         output_path = os.path.join(RESULTS_DIR, filename)
         df.to_csv(output_path, index=False)
 
-        append_best_to_summary(best_params, best_loss, best_accuracy, elapsed, dataset_name)
+        append_best_to_summary(best_params, best_loss, best_metrics, elapsed, dataset_name)
 
         logger.info(f"{dataset_name} FINISHED")
         logger.info(f"Best parameters: {dict(zip(PARAM_NAMES, best_params))}")
         logger.info(f"Best val_loss: {best_loss:.6f}")
-        logger.info(f"Best val_accuracy: {best_accuracy:.6f}")
+        logger.info(f"Best val_accuracy: {best_metrics['val_accuracy']:.6f}")
+        logger.info(f"Best macro F1: {best_metrics['f1']:.6f}")
         logger.info(f"Execution time: {elapsed:.2f} s")
         logger.info(f"Results saved to: {output_path}")
 

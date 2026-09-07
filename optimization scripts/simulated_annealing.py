@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 from data.global_data_loader import get_data_all_datasets
+from model.metrics import metrics_from
 from model.model_builder import evaluate_model
 from results_io import append_best_row
 
@@ -78,8 +79,7 @@ def evaluate_individual(individual, X_train, X_val, y_train, y_val):
         float(individual["learning_rate"]),
         int(individual["batch_size"]),
     ]
-    result = evaluate_model(params, X_train, X_val, y_train, y_val)
-    return result["val_loss"], result["val_accuracy"], result["epochs"]
+    return evaluate_model(params, X_train, X_val, y_train, y_val)
 
 
 def create_visualisations(dataset_name):
@@ -119,18 +119,19 @@ def run_simulated_annealing(dataset_name, X, y):
     start_time = time.perf_counter()
 
     current = random_individual()
-    current_loss, current_acc, epochs = evaluate_individual(current, X_train, X_val, y_train, y_val)
+    current_result = evaluate_individual(current, X_train, X_val, y_train, y_val)
+    current_loss = current_result["val_loss"]
 
     best_solution = current.copy()
     best_loss = current_loss
-    best_accuracy = current_acc
+    best_metrics = metrics_from(current_result)
 
     results_log.append({
         "dataset": dataset_name,
         **current,
         "val_loss": current_loss,
-        "val_accuracy": current_acc,
-        "epochs_used": epochs,
+        **metrics_from(current_result),
+        "epochs_used": current_result["epochs"],
         "method": "Simulated Annealing",
     })
     update_convergence(1, best_loss, conv_x, conv_y, conv_line, ax_conv, fig_conv, dataset_name)
@@ -144,14 +145,15 @@ def run_simulated_annealing(dataset_name, X, y):
             break
 
         candidate = random_neighbor(current)
-        candidate_loss, candidate_acc, cand_epochs = evaluate_individual(candidate, X_train, X_val, y_train, y_val)
+        candidate_result = evaluate_individual(candidate, X_train, X_val, y_train, y_val)
+        candidate_loss = candidate_result["val_loss"]
 
         results_log.append({
             "dataset": dataset_name,
             **candidate,
             "val_loss": candidate_loss,
-            "val_accuracy": candidate_acc,
-            "epochs_used": cand_epochs,
+            **metrics_from(candidate_result),
+            "epochs_used": candidate_result["epochs"],
             "method": "Simulated Annealing",
         })
 
@@ -161,7 +163,7 @@ def run_simulated_annealing(dataset_name, X, y):
             current_loss = candidate_loss
             if current_loss < best_loss:
                 best_loss = current_loss
-                best_accuracy = candidate_acc
+                best_metrics = metrics_from(candidate_result)
                 best_solution = current.copy()
                 logger.info(f"  NEW BEST: {best_loss:.6f}")
 
@@ -174,16 +176,16 @@ def run_simulated_annealing(dataset_name, X, y):
 
     elapsed = time.perf_counter() - start_time
     plt.close(fig_conv)
-    return results_log, best_solution, best_loss, best_accuracy, elapsed
+    return results_log, best_solution, best_loss, best_metrics, elapsed
 
 
-def append_best_to_summary(best_solution, best_loss, best_accuracy, elapsed, dataset_name):
+def append_best_to_summary(best_solution, best_loss, best_metrics, elapsed, dataset_name):
     summary_path = os.path.join(RESULTS_DIR, 'best_results.csv')
     row = pd.DataFrame([{
         "dataset": dataset_name,
         **best_solution,
         "val_loss": best_loss,
-        "val_accuracy": best_accuracy,
+        **best_metrics,
         "method": "Simulated Annealing",
         "execution_time": round(elapsed, 4),
     }])
@@ -198,19 +200,20 @@ if __name__ == "__main__":
         X, y = dataset
         logger.info(f"{dataset_name}: X={X.shape}, y={y.shape}")
 
-        results, best_solution, best_loss, best_accuracy, elapsed = run_simulated_annealing(dataset_name, X, y)
+        results, best_solution, best_loss, best_metrics, elapsed = run_simulated_annealing(dataset_name, X, y)
 
         df = pd.DataFrame(results)
         filename = f"simulated_annealing_results_{dataset_name.lower().replace('-', '_')}.csv"
         output_path = os.path.join(RESULTS_DIR, filename)
         df.to_csv(output_path, index=False)
 
-        append_best_to_summary(best_solution, best_loss, best_accuracy, elapsed, dataset_name)
+        append_best_to_summary(best_solution, best_loss, best_metrics, elapsed, dataset_name)
 
         logger.info(f"{dataset_name} FINISHED")
         logger.info(f"Best parameters: {best_solution}")
         logger.info(f"Best val_loss: {best_loss:.6f}")
-        logger.info(f"Best val_accuracy: {best_accuracy:.6f}")
+        logger.info(f"Best val_accuracy: {best_metrics['val_accuracy']:.6f}")
+        logger.info(f"Best macro F1: {best_metrics['f1']:.6f}")
         logger.info(f"Execution time: {elapsed:.2f} s")
         logger.info(f"Results saved to: {output_path}")
 

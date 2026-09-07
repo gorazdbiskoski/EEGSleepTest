@@ -1,5 +1,6 @@
 import numpy as np
 
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, LSTM, Dense, Dropout, BatchNormalization
 from tensorflow.keras.optimizers import Adam
@@ -81,9 +82,27 @@ def evaluate_model(
         verbose=1
     )
 
+    # EarlyStopping(restore_best_weights=True) puts the best-val_loss epoch's
+    # weights back before fit() returns -- and does so whether or not it
+    # actually stopped early -- so this single predict describes that one
+    # epoch. Reading max(val_accuracy) out of history instead could report a
+    # different epoch than the min(val_loss) being optimised against.
+    y_pred = model.predict(X_val, batch_size=batch_size, verbose=0).argmax(axis=1)
+
+    # Macro averaging weighs every sleep stage equally, so N1 -- the rarest and
+    # hardest stage -- is not drowned out by W and N2. zero_division=0 keeps a
+    # degenerate model that never predicts some stage from writing NaN into the
+    # results CSVs and convergence plots.
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        y_val, y_pred, average="macro", zero_division=0
+    )
+
     result = {
         "val_loss": min(history.history["val_loss"]),
-        "val_accuracy": max(history.history["val_accuracy"]),
+        "val_accuracy": float(accuracy_score(y_val, y_pred)),
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
         "epochs": len(history.history["loss"])
     }
 

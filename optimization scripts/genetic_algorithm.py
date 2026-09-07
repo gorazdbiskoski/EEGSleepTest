@@ -15,6 +15,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from data.global_data_loader import get_data_all_datasets
+from model.metrics import metrics_from
 from model.model_builder import evaluate_model
 from results_io import append_best_row
 
@@ -45,7 +46,7 @@ def run_genetic_algorithm(dataset_name, X, y):
 
     results_log = []
     best_loss = float("inf")
-    best_accuracy = None
+    best_metrics = None
     best_solution = None
     conv_x = []
     conv_y = []
@@ -109,8 +110,7 @@ def run_genetic_algorithm(dataset_name, X, y):
             float(individual["learning_rate"]),
             int(individual["batch_size"])
         ]
-        result = evaluate_model(params, X_train, X_test, y_train, y_test)
-        return result["val_loss"], result["val_accuracy"], result["epochs"]
+        return evaluate_model(params, X_train, X_test, y_train, y_test)
 
     def tournament_selection(population, fitnesses):
         selected = random.sample(list(zip(population, fitnesses)), TOURNAMENT_SIZE)
@@ -136,7 +136,8 @@ def run_genetic_algorithm(dataset_name, X, y):
     for generation in range(NUM_GENERATIONS):
         fitnesses = []
         for individual in population:
-            loss, acc, epochs_used = evaluate_individual(individual)
+            result = evaluate_individual(individual)
+            loss = result["val_loss"]
             fitnesses.append(loss)
             results_log.append({
                 "dataset": dataset_name,
@@ -148,13 +149,13 @@ def run_genetic_algorithm(dataset_name, X, y):
                 "learning_rate": individual["learning_rate"],
                 "batch_size": individual["batch_size"],
                 "val_loss": loss,
-                "val_accuracy": acc,
-                "epochs_used": epochs_used,
+                **metrics_from(result),
+                "epochs_used": result["epochs"],
                 "method": "GA"
             })
             if loss < best_loss:
                 best_loss = loss
-                best_accuracy = acc
+                best_metrics = metrics_from(result)
                 best_solution = individual.copy()
 
         sorted_population = [individual for _, individual in sorted(zip(fitnesses, population), key=lambda pair: pair[0])]
@@ -174,10 +175,10 @@ def run_genetic_algorithm(dataset_name, X, y):
     elapsed = time.perf_counter() - start_time
     plt.close(fig_conv)
     plt.close(fig_heat)
-    return (results_log, best_solution, best_loss, best_accuracy, elapsed)
+    return (results_log, best_solution, best_loss, best_metrics, elapsed)
 
 
-def append_best_to_summary(best_solution, best_loss, best_accuracy, elapsed, dataset_name):
+def append_best_to_summary(best_solution, best_loss, best_metrics, elapsed, dataset_name):
     summary_path = os.path.join(RESULTS_DIR, 'best_results.csv')
     row = pd.DataFrame([{
         "dataset": dataset_name,
@@ -188,7 +189,7 @@ def append_best_to_summary(best_solution, best_loss, best_accuracy, elapsed, dat
         "learning_rate": best_solution["learning_rate"],
         "batch_size": best_solution["batch_size"],
         "val_loss": best_loss,
-        "val_accuracy": best_accuracy,
+        **best_metrics,
         "method": "GA",
         "execution_time": round(elapsed, 4)
     }])
@@ -204,8 +205,8 @@ if __name__ == "__main__":
 
     for dataset_name, dataset in datasets.items():
         X, y = dataset
-        (results, best_solution, best_loss, best_accuracy, elapsed) = run_genetic_algorithm(dataset_name, X, y)
+        (results, best_solution, best_loss, best_metrics, elapsed) = run_genetic_algorithm(dataset_name, X, y)
         df = pd.DataFrame(results)
         filename = f"ga_results_{dataset_name.lower().replace('-', '_')}.csv"
         df.to_csv(os.path.join(RESULTS_DIR, filename), index=False)
-        append_best_to_summary(best_solution, best_loss, best_accuracy, elapsed, dataset_name)
+        append_best_to_summary(best_solution, best_loss, best_metrics, elapsed, dataset_name)

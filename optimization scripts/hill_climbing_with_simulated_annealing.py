@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 
 from data.global_data_loader import get_data_all_datasets
+from model.metrics import metrics_from
 from model.model_builder import evaluate_model
 from results_io import append_best_row
 
@@ -90,8 +91,7 @@ def evaluate_individual(individual, X_train, X_val, y_train, y_val):
         float(individual["learning_rate"]),
         int(individual["batch_size"]),
     ]
-    result = evaluate_model(params, X_train, X_val, y_train, y_val)
-    return result["val_loss"], result["val_accuracy"], result["epochs"]
+    return evaluate_model(params, X_train, X_val, y_train, y_val)
 
 
 def create_visualisations(dataset_name):
@@ -117,7 +117,8 @@ def update_convergence(eval_num, best_loss, conv_x, conv_y, conv_line, ax_conv, 
 def run_inner_hc(start, basin_id, state, X_train, X_val, y_train, y_val, results_log, dataset_name,
                  conv_x, conv_y, conv_line, ax_conv, fig_conv):
     current = start
-    current_loss, current_acc, epochs = evaluate_individual(current, X_train, X_val, y_train, y_val)
+    current_result = evaluate_individual(current, X_train, X_val, y_train, y_val)
+    current_loss = current_result["val_loss"]
     state["evals_used"] += 1
 
     results_log.append({
@@ -129,8 +130,8 @@ def run_inner_hc(start, basin_id, state, X_train, X_val, y_train, y_val, results
         "learning_rate": current["learning_rate"],
         "batch_size": current["batch_size"],
         "val_loss": current_loss,
-        "val_accuracy": current_acc,
-        "epochs_used": epochs,
+        **metrics_from(current_result),
+        "epochs_used": current_result["epochs"],
         "basin_id": basin_id,
         "phase": "hc_start",
         "method": "Basin Hopping",
@@ -138,7 +139,7 @@ def run_inner_hc(start, basin_id, state, X_train, X_val, y_train, y_val, results
 
     if current_loss < state["best_loss"]:
         state["best_loss"] = current_loss
-        state["best_accuracy"] = current_acc
+        state["best_metrics"] = metrics_from(current_result)
         state["best_solution"] = current.copy()
 
     update_convergence(state["evals_used"], state["best_loss"], conv_x, conv_y, conv_line, ax_conv, fig_conv, dataset_name)
@@ -152,7 +153,8 @@ def run_inner_hc(start, basin_id, state, X_train, X_val, y_train, y_val, results
             if state["evals_used"] >= MAX_EVALS:
                 return current, current_loss
 
-            n_loss, n_acc, n_epochs = evaluate_individual(neighbor, X_train, X_val, y_train, y_val)
+            n_result = evaluate_individual(neighbor, X_train, X_val, y_train, y_val)
+            n_loss = n_result["val_loss"]
             state["evals_used"] += 1
 
             results_log.append({
@@ -164,8 +166,8 @@ def run_inner_hc(start, basin_id, state, X_train, X_val, y_train, y_val, results
                 "learning_rate": neighbor["learning_rate"],
                 "batch_size": neighbor["batch_size"],
                 "val_loss": n_loss,
-                "val_accuracy": n_acc,
-                "epochs_used": n_epochs,
+                **metrics_from(n_result),
+                "epochs_used": n_result["epochs"],
                 "basin_id": basin_id,
                 "phase": "hc_step",
                 "method": "Basin Hopping",
@@ -173,7 +175,7 @@ def run_inner_hc(start, basin_id, state, X_train, X_val, y_train, y_val, results
 
             if n_loss < state["best_loss"]:
                 state["best_loss"] = n_loss
-                state["best_accuracy"] = n_acc
+                state["best_metrics"] = metrics_from(n_result)
                 state["best_solution"] = neighbor.copy()
 
             update_convergence(state["evals_used"], state["best_loss"], conv_x, conv_y, conv_line, ax_conv, fig_conv, dataset_name)
@@ -205,7 +207,7 @@ def run_basin_hopping(dataset_name, X, y):
     state = {
         "evals_used": 0,
         "best_loss": float("inf"),
-        "best_accuracy": None,
+        "best_metrics": None,
         "best_solution": None,
     }
 
@@ -256,10 +258,10 @@ def run_basin_hopping(dataset_name, X, y):
     elapsed = time.perf_counter() - start_time
     plt.close(fig_conv)
 
-    return results_log, state["best_solution"], state["best_loss"], state["best_accuracy"], elapsed
+    return results_log, state["best_solution"], state["best_loss"], state["best_metrics"], elapsed
 
 
-def append_best_to_summary(best_solution, best_loss, best_accuracy, elapsed, dataset_name):
+def append_best_to_summary(best_solution, best_loss, best_metrics, elapsed, dataset_name):
     summary_path = os.path.join(RESULTS_DIR, 'best_results.csv')
     row = pd.DataFrame([{
         "dataset": dataset_name,
@@ -270,7 +272,7 @@ def append_best_to_summary(best_solution, best_loss, best_accuracy, elapsed, dat
         "learning_rate": best_solution["learning_rate"],
         "batch_size": best_solution["batch_size"],
         "val_loss": best_loss,
-        "val_accuracy": best_accuracy,
+        **best_metrics,
         "method": "Basin Hopping",
         "execution_time": round(elapsed, 4),
     }])
@@ -285,19 +287,20 @@ if __name__ == "__main__":
         X, y = dataset
         logger.info(f"{dataset_name}: X={X.shape}, y={y.shape}")
 
-        results, best_solution, best_loss, best_accuracy, elapsed = run_basin_hopping(dataset_name, X, y)
+        results, best_solution, best_loss, best_metrics, elapsed = run_basin_hopping(dataset_name, X, y)
 
         df = pd.DataFrame(results)
         filename = f"basin_hopping_results_{dataset_name.lower().replace('-', '_')}.csv"
         output_path = os.path.join(RESULTS_DIR, filename)
         df.to_csv(output_path, index=False)
 
-        append_best_to_summary(best_solution, best_loss, best_accuracy, elapsed, dataset_name)
+        append_best_to_summary(best_solution, best_loss, best_metrics, elapsed, dataset_name)
 
         logger.info(f"{dataset_name} FINISHED")
         logger.info(f"Best parameters: {best_solution}")
         logger.info(f"Best val_loss: {best_loss:.6f}")
-        logger.info(f"Best val_accuracy: {best_accuracy:.6f}")
+        logger.info(f"Best val_accuracy: {best_metrics['val_accuracy']:.6f}")
+        logger.info(f"Best macro F1: {best_metrics['f1']:.6f}")
         logger.info(f"Execution time: {elapsed:.2f} s")
         logger.info(f"Results saved to: {output_path}")
 
