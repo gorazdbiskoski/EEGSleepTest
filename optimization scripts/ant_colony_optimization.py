@@ -367,10 +367,13 @@ def run_aco(dataset_name, X, y):
 
                 logger.info(f"NEW BEST: "f"{best_loss:.6f}")
 
-            for param in pheromones:
-                pheromones[param] *= (
-                1 - EVAPORATION_RATE
-            )
+        # Evaporate once per iteration, after every ant has been evaluated.
+        # This ran inside the ant loop, so it compounded NUM_ANTS times per
+        # iteration: at the corrected budget of 10 ants a 0.3 rate decayed
+        # the trail by 97% each round, leaving pheromone carrying almost no
+        # information between iterations and ACO behaving like random search.
+        for param in pheromones:
+            pheromones[param] *= (1 - EVAPORATION_RATE)
 
         for solution, indices, loss in all_solutions:
             pheromone_deposit = (
